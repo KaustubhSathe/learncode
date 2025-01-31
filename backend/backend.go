@@ -1,13 +1,25 @@
 package main
 
 import (
+	"log"
+	"os"
+
 	"github.com/aws/aws-cdk-go/awscdk/v2"
 	"github.com/aws/jsii-runtime-go"
+	"github.com/joho/godotenv"
 	"learncode/backend/lib"
-	"os"
 )
 
+func init() {
+	log.Println("Starting initialization...")
+	if err := godotenv.Load(); err != nil {
+		log.Printf("Warning: No .env file found: %v", err)
+	}
+	log.Println("Environment variables loaded")
+}
+
 func main() {
+	log.Println("Starting main...")
 	defer jsii.Close()
 	app := awscdk.NewApp(nil)
 

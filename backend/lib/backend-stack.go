@@ -1,15 +1,17 @@
 package lib
 
 import (
+	"os"
+
 	"github.com/aws/aws-cdk-go/awscdk/v2"
-	"github.com/aws/aws-cdk-go/awscdk/v2/awsapigateway"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsdynamodb"
-	"github.com/aws/aws-cdk-go/awscdk/v2/awslambda"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsiam"
-	"github.com/aws/aws-cdk-go/awscdk/v2/awss3assets"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awslambda"
+	"github.com/aws/aws-cdk-go/awscdkapigatewayv2alpha/v2"
+	"github.com/aws/aws-cdk-go/awscdkapigatewayv2integrationsalpha/v2"
+	"github.com/aws/aws-cdk-go/awscdklambdagoalpha/v2"
 	"github.com/aws/constructs-go/constructs/v10"
 	"github.com/aws/jsii-runtime-go"
-	"os"
 )
 
 type BackendStackProps struct {
@@ -55,44 +57,63 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 	submissionsTable.GrantReadWriteData(lambdaRole)
 
 	// Lambda Functions
-	submitLambda := awslambda.NewFunction(stack, jsii.String("SubmitFunction"), &awslambda.FunctionProps{
-		Runtime: awslambda.Runtime_GO_1_X(),
-		Handler: jsii.String("bootstrap"),
-		Code:    awslambda.Code_FromAsset(jsii.String("build/submit"), &awss3assets.AssetOptions{}),
+	submitLambda := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("SubmitFunction"), &awscdklambdagoalpha.GoFunctionProps{
+		Runtime: awslambda.Runtime_PROVIDED_AL2(),
+		Entry:   jsii.String("lambda/submit"),
 		Role:    lambdaRole,
+		Bundling: &awscdklambdagoalpha.BundlingOptions{
+			Environment: &map[string]*string{
+				"GOOS":   jsii.String("linux"),
+				"GOARCH": jsii.String("amd64"),
+			},
+		},
 		Environment: &map[string]*string{
 			"PROBLEMS_TABLE":    problemsTable.TableName(),
 			"SUBMISSIONS_TABLE": submissionsTable.TableName(),
-			"MOMENTO_TOKEN":     jsii.String(os.Getenv("MOMENTO_AUTH_TOKEN")),
+			"MOMENTO_TOKEN":     jsii.String(os.Getenv("MOMENTO_TOKEN")),
 		},
 	})
 
-	getProblemsLambda := awslambda.NewFunction(stack, jsii.String("GetProblemsFunction"), &awslambda.FunctionProps{
-		Runtime: awslambda.Runtime_GO_1_X(),
-		Handler: jsii.String("bootstrap"),
-		Code:    awslambda.Code_FromAsset(jsii.String("build/get-problems"), &awss3assets.AssetOptions{}),
+	getProblemsLambda := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("GetProblemsFunction"), &awscdklambdagoalpha.GoFunctionProps{
+		Runtime: awslambda.Runtime_PROVIDED_AL2(),
+		Entry:   jsii.String("lambda/get-problems"),
 		Role:    lambdaRole,
+		Bundling: &awscdklambdagoalpha.BundlingOptions{
+			Environment: &map[string]*string{
+				"GOOS":   jsii.String("linux"),
+				"GOARCH": jsii.String("amd64"),
+			},
+		},
 		Environment: &map[string]*string{
 			"PROBLEMS_TABLE": problemsTable.TableName(),
 		},
 	})
 
-	getProblemLambda := awslambda.NewFunction(stack, jsii.String("GetProblemFunction"), &awslambda.FunctionProps{
-		Runtime: awslambda.Runtime_GO_1_X(),
-		Handler: jsii.String("bootstrap"),
-		Code:    awslambda.Code_FromAsset(jsii.String("build/get-problem"), &awss3assets.AssetOptions{}),
+	getProblemLambda := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("GetProblemFunction"), &awscdklambdagoalpha.GoFunctionProps{
+		Runtime: awslambda.Runtime_PROVIDED_AL2(),
+		Entry:   jsii.String("lambda/get-problem"),
 		Role:    lambdaRole,
+		Bundling: &awscdklambdagoalpha.BundlingOptions{
+			Environment: &map[string]*string{
+				"GOOS":   jsii.String("linux"),
+				"GOARCH": jsii.String("amd64"),
+			},
+		},
 		Environment: &map[string]*string{
 			"PROBLEMS_TABLE": problemsTable.TableName(),
 		},
 	})
 
-	// Auth Lambda
-	authLambda := awslambda.NewFunction(stack, jsii.String("AuthFunction"), &awslambda.FunctionProps{
-		Runtime: awslambda.Runtime_GO_1_X(),
-		Handler: jsii.String("bootstrap"),
-		Code:    awslambda.Code_FromAsset(jsii.String("build/auth"), &awss3assets.AssetOptions{}),
+	authLambda := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("AuthFunction"), &awscdklambdagoalpha.GoFunctionProps{
+		Runtime: awslambda.Runtime_PROVIDED_AL2(),
+		Entry:   jsii.String("lambda/auth"),
 		Role:    lambdaRole,
+		Bundling: &awscdklambdagoalpha.BundlingOptions{
+			Environment: &map[string]*string{
+				"GOOS":   jsii.String("linux"),
+				"GOARCH": jsii.String("amd64"),
+			},
+		},
 		Environment: &map[string]*string{
 			"GITHUB_CLIENT_ID":     jsii.String(os.Getenv("GITHUB_CLIENT_ID")),
 			"GITHUB_CLIENT_SECRET": jsii.String(os.Getenv("GITHUB_CLIENT_SECRET")),
@@ -100,55 +121,73 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		},
 	})
 
-	// API Gateway Authorizer
-	authorizer := awsapigateway.NewTokenAuthorizer(stack, jsii.String("GithubAuthorizer"), &awsapigateway.TokenAuthorizerProps{
-		Handler: authLambda,
-	})
-
-	// API Gateway with default authorization
-	api := awsapigateway.NewRestApi(stack, jsii.String("LearnCodeApi"), &awsapigateway.RestApiProps{
-		RestApiName: jsii.String("LearnCode API"),
-		DefaultCorsPreflightOptions: &awsapigateway.CorsOptions{
-			AllowOrigins: awsapigateway.Cors_ALL_ORIGINS(),
-			AllowMethods: awsapigateway.Cors_ALL_METHODS(),
-			AllowHeaders: &[]*string{
-				jsii.String("Authorization"),
-				jsii.String("Content-Type"),
+	// HTTP API
+	httpApi := awscdkapigatewayv2alpha.NewHttpApi(stack, jsii.String("LearnCodeApi"), &awscdkapigatewayv2alpha.HttpApiProps{
+		ApiName: jsii.String("LearnCode API"),
+		CorsPreflight: &awscdkapigatewayv2alpha.CorsPreflightOptions{
+			AllowHeaders: jsii.Strings("Authorization", "Content-Type"),
+			AllowMethods: &[]awscdkapigatewayv2alpha.CorsHttpMethod{
+				awscdkapigatewayv2alpha.CorsHttpMethod_GET,
+				awscdkapigatewayv2alpha.CorsHttpMethod_POST,
+				awscdkapigatewayv2alpha.CorsHttpMethod_OPTIONS,
 			},
-		},
-		DefaultMethodOptions: &awsapigateway.MethodOptions{
-			Authorizer: authorizer,
+			AllowOrigins: jsii.Strings("*"),
 		},
 	})
 
-	// Auth endpoints (no authorizer)
-	auth := api.Root().AddResource(jsii.String("auth"), nil)
-	githubAuth := auth.AddResource(jsii.String("github"), nil)
-	githubAuth.AddMethod(jsii.String("GET"), 
-		awsapigateway.NewLambdaIntegration(authLambda, nil), 
-		&awsapigateway.MethodOptions{
-			Authorizer: nil, // No auth required for login
+	// Routes without authorizer
+	httpApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
+		Path: jsii.String("/auth/github"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
+			awscdkapigatewayv2alpha.HttpMethod_GET,
 		},
-	)
+		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
+			jsii.String("AuthIntegration"),
+			authLambda,
+			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
+		),
+	})
 
-	// Protected endpoints (with authorizer)
-	problems := api.Root().AddResource(jsii.String("problems"), nil)
-	problems.AddMethod(jsii.String("GET"), 
-		awsapigateway.NewLambdaIntegration(getProblemsLambda, nil), nil)
+	httpApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
+		Path: jsii.String("/problems"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
+			awscdkapigatewayv2alpha.HttpMethod_GET,
+		},
+		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
+			jsii.String("GetProblemsIntegration"),
+			getProblemsLambda,
+			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
+		),
+	})
 
-	problem := problems.AddResource(jsii.String("{id}"), nil)
-	problem.AddMethod(jsii.String("GET"),
-		awsapigateway.NewLambdaIntegration(getProblemLambda, nil), nil)
+	httpApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
+		Path: jsii.String("/problems/{id}"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
+			awscdkapigatewayv2alpha.HttpMethod_GET,
+		},
+		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
+			jsii.String("GetProblemIntegration"),
+			getProblemLambda,
+			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
+		),
+	})
 
-	submit := api.Root().AddResource(jsii.String("submit"), nil)
-	submit.AddMethod(jsii.String("POST"),
-		awsapigateway.NewLambdaIntegration(submitLambda, nil), nil)
+	httpApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
+		Path: jsii.String("/submit"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
+			awscdkapigatewayv2alpha.HttpMethod_POST,
+		},
+		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
+			jsii.String("SubmitIntegration"),
+			submitLambda,
+			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
+		),
+	})
 
 	// Stack Outputs
 	awscdk.NewCfnOutput(stack, jsii.String("ApiEndpoint"), &awscdk.CfnOutputProps{
-		Value: api.Url(),
+		Value: httpApi.Url(),
 	})
 
 	return stack
-} 
-
+}
