@@ -1,52 +1,105 @@
-import Link from "next/link"
-import { supabase } from "@/lib/supabase"
+'use client'
 
-const { data: problems } = await supabase
-  .from('problems')
-  .select('*')
-  .is('deleted_at', null)
-  .order('created_at', { ascending: false });
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+
+interface Problem {
+  id: string
+  title: string
+  description: string
+  difficulty: string
+}
+
+interface User {
+  id: number
+  login: string
+}
 
 export default function ProblemsPage() {
+  const router = useRouter()
+  const [problems, setProblems] = useState<Problem[]>([])
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    console.log('useEffect called inside problems')
+    const fetchProblems = async () => {
+      try {
+        const token = localStorage.getItem('auth_token')
+        console.log('Problems: Token retrieved:', token)
+        
+        if (!token) {
+          console.log('Problems: No token found, redirecting to login')
+          router.push('/')
+          return
+        }
+
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/problems`, {
+          headers: {
+            'Authorization': token,
+            'Content-Type': 'application/json',
+          },
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch problems')
+        }
+
+        const data = await response.json()
+        setProblems(data.problems)
+        setUser(data.user)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An error occurred')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchProblems()
+  }, [router])
+
+
+  if (loading) return <div>Loading...</div>
+  if (error) return <div>Error: {error}</div>
+
   return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Problems</h1>
-      <div className="rounded-lg border">
-        <div className="grid grid-cols-12 border-b px-6 py-3 font-medium">
-          <div className="col-span-6">Title</div>
-          <div className="col-span-4">Difficulty</div>
-          <div className="col-span-2">Solve</div>
+    <div className="container mx-auto px-4 py-8">
+      {user && (
+        <div className="mb-8">
+          <h2 className="text-xl font-bold">Welcome, {user.login}!</h2>
         </div>
+      )}
+      
+      <h1 className="text-3xl font-bold mb-6">Coding Problems</h1>
+      
+      <div className="grid gap-4">
         {problems.map((problem) => (
-          <div
-            key={problem.id}
-            className="grid grid-cols-12 items-center px-6 py-4 hover:bg-muted/50"
+          <div 
+            key={problem.id} 
+            className="border rounded-lg p-4 hover:shadow-lg transition-shadow cursor-pointer"
+            onClick={() => router.push(`/problems/${problem.id}`)}
           >
-            <div className="col-span-6 font-medium">{problem.title}</div>
-            <div className="col-span-4">
-              <span
-                className={`rounded-full px-2 py-1 text-xs font-medium ${
-                  problem.difficulty === "Easy"
-                    ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
-                    : problem.difficulty === "Medium"
-                    ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300"
-                    : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
-                }`}
-              >
+            <div className="flex justify-between items-center">
+              <h3 className="text-xl font-semibold">{problem.title}</h3>
+              <span className={`px-3 py-1 rounded-full text-sm ${
+                problem.difficulty === 'Easy' ? 'bg-green-100 text-green-800' :
+                problem.difficulty === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
+                'bg-red-100 text-red-800'
+              }`}>
                 {problem.difficulty}
               </span>
             </div>
-            <div className="col-span-2">
-              <Link
-                href={`/problems/${problem.id}`}
-                className="text-primary hover:underline"
-              >
-                Solve →
-              </Link>
-            </div>
+            <p className="mt-2 text-gray-600">{problem.description}</p>
           </div>
         ))}
       </div>
+
+      {problems.length === 0 && (
+        <div className="text-center text-gray-500 mt-8">
+          No problems found
+        </div>
+      )}
     </div>
   )
-} 
+}

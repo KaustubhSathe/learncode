@@ -1,52 +1,37 @@
 "use client"
 
-import { useEffect } from "react"
-import { Github } from "lucide-react"
-import Cookies from 'js-cookie'
-import { useRouter } from "next/navigation"
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 export default function LoginPage() {
   const router = useRouter()
+  const [isLoading, setIsLoading] = useState(true)
 
-  // Handle GitHub OAuth callback
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const token = params.get("token")
+    const token = localStorage.getItem('auth_token')
+    console.log('Login: Token retrieved:', token)
     if (token) {
-      // Store token in cookie
-      Cookies.set('auth_token', token, { 
-        expires: 7, // 7 days
-        secure: true,
-        sameSite: 'strict'
-      })
-      // Redirect to home
-      router.push('/')
+      router.push('/problems')
     }
+    setIsLoading(false)
   }, [router])
 
   const handleGitHubLogin = () => {
-    // Redirect to backend auth endpoint
     window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/auth/github`
   }
 
-  return (
-    <div className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)]">
-      <div className="w-full max-w-md space-y-8">
-        <div className="text-center">
-          <h2 className="text-3xl font-bold">Welcome to LearnCode</h2>
-          <p className="mt-2 text-muted-foreground">
-            Sign in to start solving problems
-          </p>
-        </div>
+  if (isLoading) {
+    return <div>Loading...</div>
+  }
 
-        <button
-          onClick={handleGitHubLogin}
-          className="flex items-center justify-center w-full gap-2 px-4 py-2 text-white bg-[#24292F] hover:bg-[#24292F]/90 rounded-md"
-        >
-          <Github className="w-5 h-5" />
-          Sign in with GitHub
-        </button>
-      </div>
+  return (
+    <div className="flex min-h-screen items-center justify-center">
+      <button
+        onClick={handleGitHubLogin}
+        className="bg-gray-900 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-gray-800"
+      >
+        <span>Login with GitHub</span>
+      </button>
     </div>
   )
 } 

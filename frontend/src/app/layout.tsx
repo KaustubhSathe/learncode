@@ -4,6 +4,7 @@ import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import Navbar from "@/components/navbar"
 import { AuthProvider } from "@/lib/auth"
+import AuthCheck from '@/components/auth-check'
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -27,12 +28,14 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AuthProvider>
-            <div className="min-h-screen bg-background">
-              <Navbar />
-              <main className="container mx-auto py-6">
-                {children}
-              </main>
-            </div>
+            <AuthCheck>
+              <div className="min-h-screen bg-background">
+                <Navbar />
+                <main className="container mx-auto py-6">
+                  {children}
+                </main>
+              </div>
+            </AuthCheck>
           </AuthProvider>
         </ThemeProvider>
       </body>

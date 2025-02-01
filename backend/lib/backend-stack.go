@@ -31,8 +31,9 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 			Name: jsii.String("id"),
 			Type: awsdynamodb.AttributeType_STRING,
 		},
-		BillingMode: awsdynamodb.BillingMode_PAY_PER_REQUEST,
-		TableName:   jsii.String("Problems"),
+		BillingMode:         awsdynamodb.BillingMode_PAY_PER_REQUEST,
+		TableName:           jsii.String("Problems"),
+		TimeToLiveAttribute: jsii.String("deleted_at"),
 	})
 
 	submissionsTable := awsdynamodb.NewTable(stack, jsii.String("Submissions"), &awsdynamodb.TableProps{
@@ -42,6 +43,15 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		},
 		BillingMode: awsdynamodb.BillingMode_PAY_PER_REQUEST,
 		TableName:   jsii.String("Submissions"),
+	})
+
+	usersTable := awsdynamodb.NewTable(stack, jsii.String("Users"), &awsdynamodb.TableProps{
+		PartitionKey: &awsdynamodb.Attribute{
+			Name: jsii.String("id"),
+			Type: awsdynamodb.AttributeType_STRING,
+		},
+		BillingMode: awsdynamodb.BillingMode_PAY_PER_REQUEST,
+		TableName:   jsii.String("Users"),
 	})
 
 	// Lambda execution role
@@ -55,6 +65,7 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 	// Grant DynamoDB permissions
 	problemsTable.GrantReadWriteData(lambdaRole)
 	submissionsTable.GrantReadWriteData(lambdaRole)
+	usersTable.GrantReadWriteData(lambdaRole)
 
 	// Lambda Functions
 	submitLambda := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("SubmitFunction"), &awscdklambdagoalpha.GoFunctionProps{
@@ -108,6 +119,29 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		Runtime: awslambda.Runtime_PROVIDED_AL2(),
 		Entry:   jsii.String("lambda/auth"),
 		Role:    lambdaRole,
+		Environment: &map[string]*string{
+			"GITHUB_CLIENT_ID": jsii.String(os.Getenv("GITHUB_CLIENT_ID")),
+		},
+	})
+
+	githubCallbackLambda := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("GithubCallbackFunction"), &awscdklambdagoalpha.GoFunctionProps{
+		Runtime: awslambda.Runtime_PROVIDED_AL2(),
+		Entry:   jsii.String("lambda/github-callback"),
+		Role:    lambdaRole,
+		Environment: &map[string]*string{
+			"GITHUB_CLIENT_ID":     jsii.String(os.Getenv("GITHUB_CLIENT_ID")),
+			"GITHUB_CLIENT_SECRET": jsii.String(os.Getenv("GITHUB_CLIENT_SECRET")),
+			"FRONTEND_URL":         jsii.String(os.Getenv("FRONTEND_URL")),
+			"USERS_TABLE":          usersTable.TableName(),
+		},
+	})
+
+	// Runner Lambdas
+	nodejsRunner := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("NodeJSRunner"), &awscdklambdagoalpha.GoFunctionProps{
+		Runtime:    awslambda.Runtime_PROVIDED_AL2(),
+		Entry:      jsii.String("lambda/runners/nodejs"),
+		Timeout:    awscdk.Duration_Seconds(jsii.Number(30)),
+		MemorySize: jsii.Number(512),
 		Bundling: &awscdklambdagoalpha.BundlingOptions{
 			Environment: &map[string]*string{
 				"GOOS":   jsii.String("linux"),
@@ -115,10 +149,139 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 			},
 		},
 		Environment: &map[string]*string{
-			"GITHUB_CLIENT_ID":     jsii.String(os.Getenv("GITHUB_CLIENT_ID")),
-			"GITHUB_CLIENT_SECRET": jsii.String(os.Getenv("GITHUB_CLIENT_SECRET")),
-			"FRONTEND_URL":         jsii.String(os.Getenv("FRONTEND_URL")),
+			"PROBLEMS_TABLE":    problemsTable.TableName(),
+			"SUBMISSIONS_TABLE": submissionsTable.TableName(),
+			"MOMENTO_API_KEY":   jsii.String(os.Getenv("MOMENTO_API_KEY")),
 		},
+	})
+
+	// Grant Docker permissions
+	nodejsRunner.Role().AddManagedPolicy(
+		awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("AWSLambdaExecute")),
+	)
+
+	cppRunner := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("cpp-runner"), &awscdklambdagoalpha.GoFunctionProps{
+		Runtime:    awslambda.Runtime_PROVIDED_AL2(),
+		Entry:      jsii.String("../lambda/runners/cpp"),
+		Timeout:    awscdk.Duration_Seconds(jsii.Number(30)),
+		MemorySize: jsii.Number(512),
+		Bundling: &awscdklambdagoalpha.BundlingOptions{
+			Environment: &map[string]*string{
+				"GOOS":   jsii.String("linux"),
+				"GOARCH": jsii.String("amd64"),
+			},
+		},
+		Environment: &map[string]*string{
+			"PROBLEMS_TABLE":    problemsTable.TableName(),
+			"SUBMISSIONS_TABLE": submissionsTable.TableName(),
+			"MOMENTO_API_KEY":   jsii.String(os.Getenv("MOMENTO_API_KEY")),
+		},
+	})
+
+	javaRunner := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("java-runner"), &awscdklambdagoalpha.GoFunctionProps{
+		Runtime:    awslambda.Runtime_PROVIDED_AL2(),
+		Entry:      jsii.String("../lambda/runners/java"),
+		Timeout:    awscdk.Duration_Seconds(jsii.Number(30)),
+		MemorySize: jsii.Number(512),
+		Bundling: &awscdklambdagoalpha.BundlingOptions{
+			Environment: &map[string]*string{
+				"GOOS":   jsii.String("linux"),
+				"GOARCH": jsii.String("amd64"),
+			},
+		},
+		Environment: &map[string]*string{
+			"PROBLEMS_TABLE":    problemsTable.TableName(),
+			"SUBMISSIONS_TABLE": submissionsTable.TableName(),
+			"MOMENTO_API_KEY":   jsii.String(os.Getenv("MOMENTO_API_KEY")),
+		},
+	})
+
+	pythonRunner := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("python-runner"), &awscdklambdagoalpha.GoFunctionProps{
+		Runtime:    awslambda.Runtime_PROVIDED_AL2(),
+		Entry:      jsii.String("../lambda/runners/python"),
+		Timeout:    awscdk.Duration_Seconds(jsii.Number(30)),
+		MemorySize: jsii.Number(512),
+		Bundling: &awscdklambdagoalpha.BundlingOptions{
+			Environment: &map[string]*string{
+				"GOOS":   jsii.String("linux"),
+				"GOARCH": jsii.String("amd64"),
+			},
+		},
+		Environment: &map[string]*string{
+			"PROBLEMS_TABLE":    problemsTable.TableName(),
+			"SUBMISSIONS_TABLE": submissionsTable.TableName(),
+			"MOMENTO_API_KEY":   jsii.String(os.Getenv("MOMENTO_API_KEY")),
+		},
+	})
+
+	// Grant DynamoDB permissions
+	problemsTable.GrantReadData(cppRunner)
+	submissionsTable.GrantWriteData(cppRunner)
+	problemsTable.GrantReadData(javaRunner)
+	submissionsTable.GrantWriteData(javaRunner)
+	problemsTable.GrantReadData(pythonRunner)
+	submissionsTable.GrantWriteData(pythonRunner)
+
+	// Create HTTP API for runners
+	runnersApi := awscdkapigatewayv2alpha.NewHttpApi(stack, jsii.String("RunnersApi"), &awscdkapigatewayv2alpha.HttpApiProps{
+		ApiName: jsii.String("Code Runners API"),
+		CorsPreflight: &awscdkapigatewayv2alpha.CorsPreflightOptions{
+			AllowHeaders: jsii.Strings("momento-signature", "Content-Type"),
+			AllowMethods: &[]awscdkapigatewayv2alpha.CorsHttpMethod{
+				awscdkapigatewayv2alpha.CorsHttpMethod_POST,
+				awscdkapigatewayv2alpha.CorsHttpMethod_OPTIONS,
+			},
+			AllowOrigins: jsii.Strings("*"),
+		},
+	})
+
+	// Add routes for each language runner
+	runnersApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
+		Path: jsii.String("/runners/nodejs"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
+			awscdkapigatewayv2alpha.HttpMethod_POST,
+		},
+		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
+			jsii.String("NodeJSRunnerIntegration"),
+			nodejsRunner,
+			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
+		),
+	})
+
+	runnersApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
+		Path: jsii.String("/runners/cpp"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
+			awscdkapigatewayv2alpha.HttpMethod_POST,
+		},
+		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
+			jsii.String("CppRunnerIntegration"),
+			cppRunner,
+			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
+		),
+	})
+
+	runnersApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
+		Path: jsii.String("/runners/java"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
+			awscdkapigatewayv2alpha.HttpMethod_POST,
+		},
+		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
+			jsii.String("JavaRunnerIntegration"),
+			javaRunner,
+			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
+		),
+	})
+
+	runnersApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
+		Path: jsii.String("/runners/python"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
+			awscdkapigatewayv2alpha.HttpMethod_POST,
+		},
+		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
+			jsii.String("PythonRunnerIntegration"),
+			pythonRunner,
+			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
+		),
 	})
 
 	// HTTP API
@@ -135,7 +298,7 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		},
 	})
 
-	// Routes without authorizer
+	// Routes for GitHub auth
 	httpApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
 		Path: jsii.String("/auth/github"),
 		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
@@ -144,6 +307,18 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
 			jsii.String("AuthIntegration"),
 			authLambda,
+			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
+		),
+	})
+
+	httpApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
+		Path: jsii.String("/auth/github/callback"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
+			awscdkapigatewayv2alpha.HttpMethod_GET,
+		},
+		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
+			jsii.String("GithubCallbackIntegration"),
+			githubCallbackLambda,
 			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
 		),
 	})
