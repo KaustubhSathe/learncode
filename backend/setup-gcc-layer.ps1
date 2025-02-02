@@ -265,7 +265,13 @@ EOL
 
 # Test compilation and execution
 echo "Testing C++ compilation and execution..."
-g++ -o /layer/test /layer/test.cpp -I/layer/gcc/include
+g++ -o /layer/test /layer/test.cpp \
+    -I/layer/gcc/include \
+    -I/layer/gcc/include/c++/$GCC_VER \
+    -I/layer/gcc/include/c++/$GCC_VER/x86_64-redhat-linux \
+    -B/layer/gcc/bin
+
+# Run the test
 /layer/test
 
 # List files and permissions
