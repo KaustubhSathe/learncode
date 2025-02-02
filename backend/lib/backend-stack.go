@@ -25,6 +25,24 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 	}
 	stack := awscdk.NewStack(scope, &id, &sprops)
 
+	// Grant CloudFormation execution role access to the Node.js layer
+	cfnExecRole := awsiam.Role_FromRoleArn(stack, jsii.String("CfnExecRole"),
+		jsii.String("arn:aws:iam::473539126755:role/cdk-hnb659fds-cfn-exec-role-473539126755-ap-south-1"), nil)
+
+	cfnExecRole.AttachInlinePolicy(awsiam.NewPolicy(stack, jsii.String("NodejsLayerAccess"), &awsiam.PolicyProps{
+		Statements: &[]awsiam.PolicyStatement{
+			awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+				Effect: awsiam.Effect_ALLOW,
+				Actions: &[]*string{
+					jsii.String("lambda:GetLayerVersion"),
+				},
+				Resources: &[]*string{
+					jsii.String("*"),
+				},
+			}),
+		},
+	}))
+
 	// DynamoDB Tables
 	problemsTable := awsdynamodb.NewTable(stack, jsii.String("Problems"), &awsdynamodb.TableProps{
 		PartitionKey: &awsdynamodb.Attribute{
@@ -62,6 +80,25 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		},
 	})
 
+	// Runner role with CloudWatch permissions
+	runnerRole := awsiam.NewRole(stack, jsii.String("RunnerExecutionRole"), &awsiam.RoleProps{
+		AssumedBy: awsiam.NewServicePrincipal(jsii.String("lambda.amazonaws.com"), nil),
+		ManagedPolicies: &[]awsiam.IManagedPolicy{
+			awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("service-role/AWSLambdaBasicExecutionRole")),
+		},
+	})
+
+	// Add Lambda layer access permission
+	runnerRole.AddToPolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+		Effect: awsiam.Effect_ALLOW,
+		Actions: &[]*string{
+			jsii.String("lambda:GetLayerVersion"),
+		},
+		Resources: &[]*string{
+			jsii.String("*"),
+		},
+	}))
+
 	// Grant DynamoDB permissions
 	problemsTable.GrantReadWriteData(lambdaRole)
 	submissionsTable.GrantReadWriteData(lambdaRole)
@@ -79,9 +116,9 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 			},
 		},
 		Environment: &map[string]*string{
-			"PROBLEMS_TABLE":    problemsTable.TableName(),
-			"SUBMISSIONS_TABLE": submissionsTable.TableName(),
-			"MOMENTO_TOKEN":     jsii.String(os.Getenv("MOMENTO_TOKEN")),
+			"PROBLEMS_TABLE":     problemsTable.TableName(),
+			"SUBMISSIONS_TABLE":  submissionsTable.TableName(),
+			"MOMENTO_AUTH_TOKEN": jsii.String(os.Getenv("MOMENTO_AUTH_TOKEN")),
 		},
 	})
 
@@ -136,35 +173,37 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		},
 	})
 
-	// Runner Lambdas
-	nodejsRunner := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("NodeJSRunner"), &awscdklambdagoalpha.GoFunctionProps{
-		Runtime:    awslambda.Runtime_PROVIDED_AL2(),
-		Entry:      jsii.String("lambda/runners/nodejs"),
-		Timeout:    awscdk.Duration_Seconds(jsii.Number(30)),
-		MemorySize: jsii.Number(512),
-		Bundling: &awscdklambdagoalpha.BundlingOptions{
-			Environment: &map[string]*string{
-				"GOOS":   jsii.String("linux"),
-				"GOARCH": jsii.String("amd64"),
-			},
-		},
-		Environment: &map[string]*string{
-			"PROBLEMS_TABLE":    problemsTable.TableName(),
-			"SUBMISSIONS_TABLE": submissionsTable.TableName(),
-			"MOMENTO_API_KEY":   jsii.String(os.Getenv("MOMENTO_API_KEY")),
+	// Create Node.js Lambda Layer
+	nodejsLayer := awslambda.NewLayerVersion(stack, jsii.String("NodejsLayer"), &awslambda.LayerVersionProps{
+		LayerVersionName: jsii.String("nodejs18"),
+		Description:      jsii.String("Node.js 18.x runtime"),
+		Code:             awslambda.Code_FromAsset(jsii.String("lambda/layers/nodejs"), nil),
+		CompatibleRuntimes: &[]awslambda.Runtime{
+			awslambda.Runtime_PROVIDED_AL2(),
 		},
 	})
 
-	// Grant Docker permissions
-	nodejsRunner.Role().AddManagedPolicy(
-		awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("AWSLambdaExecute")),
-	)
+	// Create GCC Lambda Layer
+	gccLayer := awslambda.NewLayerVersion(stack, jsii.String("GccLayer"), &awslambda.LayerVersionProps{
+		LayerVersionName: jsii.String("gcc"),
+		Description:      jsii.String("GCC compiler"),
+		Code:             awslambda.Code_FromAsset(jsii.String("lambda/layers/gcc"), nil),
+		CompatibleRuntimes: &[]awslambda.Runtime{
+			awslambda.Runtime_PROVIDED_AL2(),
+		},
+	})
 
-	cppRunner := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("cpp-runner"), &awscdklambdagoalpha.GoFunctionProps{
+	// Runner Lambdas
+	nodejsRunner := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("node-runner"), &awscdklambdagoalpha.GoFunctionProps{
 		Runtime:    awslambda.Runtime_PROVIDED_AL2(),
-		Entry:      jsii.String("../lambda/runners/cpp"),
+		Entry:      jsii.String("lambda/runners/nodejs"),
+		ModuleDir:  jsii.String("."),
 		Timeout:    awscdk.Duration_Seconds(jsii.Number(30)),
 		MemorySize: jsii.Number(512),
+		Role:       runnerRole,
+		Layers: &[]awslambda.ILayerVersion{
+			nodejsLayer,
+		},
 		Bundling: &awscdklambdagoalpha.BundlingOptions{
 			Environment: &map[string]*string{
 				"GOOS":   jsii.String("linux"),
@@ -172,17 +211,42 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 			},
 		},
 		Environment: &map[string]*string{
-			"PROBLEMS_TABLE":    problemsTable.TableName(),
-			"SUBMISSIONS_TABLE": submissionsTable.TableName(),
-			"MOMENTO_API_KEY":   jsii.String(os.Getenv("MOMENTO_API_KEY")),
+			"PROBLEMS_TABLE":     problemsTable.TableName(),
+			"SUBMISSIONS_TABLE":  submissionsTable.TableName(),
+			"MOMENTO_AUTH_TOKEN": jsii.String(os.Getenv("MOMENTO_AUTH_TOKEN")),
+		},
+	})
+
+	cppRunner := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("cpp-runner"), &awscdklambdagoalpha.GoFunctionProps{
+		Runtime:    awslambda.Runtime_PROVIDED_AL2(),
+		Entry:      jsii.String("lambda/runners/cpp"),
+		ModuleDir:  jsii.String("."),
+		Timeout:    awscdk.Duration_Seconds(jsii.Number(30)),
+		MemorySize: jsii.Number(512),
+		Role:       runnerRole,
+		Layers: &[]awslambda.ILayerVersion{
+			gccLayer,
+		},
+		Bundling: &awscdklambdagoalpha.BundlingOptions{
+			Environment: &map[string]*string{
+				"GOOS":   jsii.String("linux"),
+				"GOARCH": jsii.String("amd64"),
+			},
+		},
+		Environment: &map[string]*string{
+			"PROBLEMS_TABLE":     problemsTable.TableName(),
+			"SUBMISSIONS_TABLE":  submissionsTable.TableName(),
+			"MOMENTO_AUTH_TOKEN": jsii.String(os.Getenv("MOMENTO_AUTH_TOKEN")),
 		},
 	})
 
 	javaRunner := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("java-runner"), &awscdklambdagoalpha.GoFunctionProps{
 		Runtime:    awslambda.Runtime_PROVIDED_AL2(),
-		Entry:      jsii.String("../lambda/runners/java"),
+		Entry:      jsii.String("lambda/runners/java"),
+		ModuleDir:  jsii.String("."),
 		Timeout:    awscdk.Duration_Seconds(jsii.Number(30)),
 		MemorySize: jsii.Number(512),
+		Role:       runnerRole,
 		Bundling: &awscdklambdagoalpha.BundlingOptions{
 			Environment: &map[string]*string{
 				"GOOS":   jsii.String("linux"),
@@ -190,17 +254,19 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 			},
 		},
 		Environment: &map[string]*string{
-			"PROBLEMS_TABLE":    problemsTable.TableName(),
-			"SUBMISSIONS_TABLE": submissionsTable.TableName(),
-			"MOMENTO_API_KEY":   jsii.String(os.Getenv("MOMENTO_API_KEY")),
+			"PROBLEMS_TABLE":     problemsTable.TableName(),
+			"SUBMISSIONS_TABLE":  submissionsTable.TableName(),
+			"MOMENTO_AUTH_TOKEN": jsii.String(os.Getenv("MOMENTO_AUTH_TOKEN")),
 		},
 	})
 
 	pythonRunner := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("python-runner"), &awscdklambdagoalpha.GoFunctionProps{
 		Runtime:    awslambda.Runtime_PROVIDED_AL2(),
-		Entry:      jsii.String("../lambda/runners/python"),
+		Entry:      jsii.String("lambda/runners/python"),
+		ModuleDir:  jsii.String("."),
 		Timeout:    awscdk.Duration_Seconds(jsii.Number(30)),
 		MemorySize: jsii.Number(512),
+		Role:       runnerRole,
 		Bundling: &awscdklambdagoalpha.BundlingOptions{
 			Environment: &map[string]*string{
 				"GOOS":   jsii.String("linux"),
@@ -208,9 +274,9 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 			},
 		},
 		Environment: &map[string]*string{
-			"PROBLEMS_TABLE":    problemsTable.TableName(),
-			"SUBMISSIONS_TABLE": submissionsTable.TableName(),
-			"MOMENTO_API_KEY":   jsii.String(os.Getenv("MOMENTO_API_KEY")),
+			"PROBLEMS_TABLE":     problemsTable.TableName(),
+			"SUBMISSIONS_TABLE":  submissionsTable.TableName(),
+			"MOMENTO_AUTH_TOKEN": jsii.String(os.Getenv("MOMENTO_AUTH_TOKEN")),
 		},
 	})
 
@@ -221,6 +287,25 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 	submissionsTable.GrantWriteData(javaRunner)
 	problemsTable.GrantReadData(pythonRunner)
 	submissionsTable.GrantWriteData(pythonRunner)
+
+	nodejsRunner.Role().AddManagedPolicy(
+		awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("AWSLambdaExecute")),
+	)
+
+	problemsTable.GrantReadData(nodejsRunner)
+	submissionsTable.GrantWriteData(nodejsRunner)
+
+	cppRunner.Role().AddManagedPolicy(
+		awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("AWSLambdaExecute")),
+	)
+
+	javaRunner.Role().AddManagedPolicy(
+		awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("AWSLambdaExecute")),
+	)
+
+	pythonRunner.Role().AddManagedPolicy(
+		awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("AWSLambdaExecute")),
+	)
 
 	// Create HTTP API for runners
 	runnersApi := awscdkapigatewayv2alpha.NewHttpApi(stack, jsii.String("RunnersApi"), &awscdkapigatewayv2alpha.HttpApiProps{
@@ -359,9 +444,15 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		),
 	})
 
-	// Stack Outputs
-	awscdk.NewCfnOutput(stack, jsii.String("ApiEndpoint"), &awscdk.CfnOutputProps{
-		Value: httpApi.Url(),
+	// Output the API endpoints
+	awscdk.NewCfnOutput(stack, jsii.String("MainApiEndpoint"), &awscdk.CfnOutputProps{
+		Value:       httpApi.Url(),
+		Description: jsii.String("Main API endpoint URL"),
+	})
+
+	awscdk.NewCfnOutput(stack, jsii.String("RunnersApiEndpoint"), &awscdk.CfnOutputProps{
+		Value:       runnersApi.Url(),
+		Description: jsii.String("Runners API endpoint URL"),
 	})
 
 	return stack

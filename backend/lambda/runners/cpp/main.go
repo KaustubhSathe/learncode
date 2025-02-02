@@ -1,176 +1,153 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"learncode/backend/db"
 	"learncode/backend/types"
 
+	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/momentohq/client-sdk-go/auth"
-	momentoconfig "github.com/momentohq/client-sdk-go/config"
-	"github.com/momentohq/client-sdk-go/momento"
 )
 
-func handleRequest(ctx context.Context) error {
-	credentialProvider, err := auth.NewEnvMomentoTokenProvider("MOMENTO_API_KEY")
+func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	fmt.Println("Received request:", event.Body)
+
+	// Parse webhook payload from Momento
+	var payload struct {
+		Cache               string `json:"cache"`
+		Topic               string `json:"topic"`
+		EventTimestamp      int64  `json:"event_timestamp"`
+		PublishTimestamp    int64  `json:"publish_timestamp"`
+		TopicSequenceNumber int    `json:"topic_sequence_number"`
+		TokenID             string `json:"token_id"`
+		Binary              string `json:"binary"`
+	}
+	if err := json.Unmarshal([]byte(event.Body), &payload); err != nil {
+		fmt.Printf("Error parsing payload: %v\n", err)
+		return events.APIGatewayProxyResponse{
+			StatusCode: 400,
+			Body:       fmt.Sprintf(`{"error": "Invalid payload: %v"}`, err),
+		}, nil
+	}
+	fmt.Printf("Decoded Momento message: %+v\n", payload)
+
+	// Decode base64 binary
+	submissionJSON, err := base64.StdEncoding.DecodeString(payload.Binary)
 	if err != nil {
-		log.Fatalf("Error loading Momento API key: %v", err)
+		fmt.Printf("Error decoding base64: %v\n", err)
+		return events.APIGatewayProxyResponse{
+			StatusCode: 400,
+			Body:       fmt.Sprintf(`{"error": "Invalid base64: %v"}`, err),
+		}, nil
 	}
 
-	client, err := momento.NewTopicClient(momentoconfig.TopicsDefault(), credentialProvider)
-	if err != nil {
-		return fmt.Errorf("failed to create Momento client: %v", err)
+	var submission types.Submission
+	if err := json.Unmarshal(submissionJSON, &submission); err != nil {
+		fmt.Printf("Error parsing submission: %v\n", err)
+		return events.APIGatewayProxyResponse{
+			StatusCode: 400,
+			Body:       fmt.Sprintf(`{"error": "Invalid submission: %v"}`, err),
+		}, nil
 	}
-	defer client.Close()
+	fmt.Printf("Processing submission: %+v\n", submission)
 
-	subscription, err := client.Subscribe(ctx, &momento.TopicSubscribeRequest{
-		CacheName: "default",
-		TopicName: "learncode-cpp",
-	})
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to topic: %v", err)
+	// Update submission status to "running"
+	if err := db.UpdateSubmissionStatus(ctx, submission.ID, "running", nil); err != nil {
+		fmt.Printf("Error updating status to running: %v\n", err)
+		return events.APIGatewayProxyResponse{
+			StatusCode: 500,
+			Body:       fmt.Sprintf(`{"error": "Failed to update status: %v"}`, err),
+		}, nil
 	}
+	fmt.Println("Updated status to running")
 
-	for {
-		event, err := subscription.Event(ctx)
-		if err != nil {
-			log.Printf("Error receiving event: %v", err)
-			continue
+	// Execute C++ code – call a helper function
+	fmt.Printf("Starting C++ execution for submission %s\n", submission.ID)
+	result, err := executeCpp(ctx, submission.Code, submission.ProblemID)
+	if err != nil {
+		fmt.Printf("Execution failed for submission %s: %v\n", submission.ID, err)
+		errStr := err.Error()
+		if updateErr := db.UpdateSubmissionStatus(ctx, submission.ID, "error", &errStr); updateErr != nil {
+			fmt.Printf("Failed to update error status: %v\n", updateErr)
 		}
-
-		switch e := event.(type) {
-		case momento.TopicItem:
-			var submission types.Submission
-			if err := json.Unmarshal(e.GetValue().(momento.Bytes), &submission); err != nil {
-				fmt.Printf("Error unmarshaling message: %v\n", err)
-				continue
-			}
-
-			if err := db.UpdateSubmissionStatus(ctx, submission.ID, "running", nil); err != nil {
-				fmt.Printf("Error updating status to running: %v\n", err)
-				continue
-			}
-
-			result, err := executeCPP(submission.Code, submission.ProblemID)
-			if err != nil {
-				errStr := err.Error()
-				db.UpdateSubmissionStatus(ctx, submission.ID, "error", &errStr)
-				continue
-			}
-
-			if err := db.UpdateSubmissionStatus(ctx, submission.ID, "completed", &result); err != nil {
-				fmt.Printf("Error updating status to completed: %v\n", err)
-			}
-
-		case momento.TopicHeartbeat:
-			fmt.Printf("Received heartbeat\n")
-
-		case momento.TopicDiscontinuity:
-			fmt.Printf("Received discontinuity - some messages may have been missed\n")
-		}
+		return events.APIGatewayProxyResponse{
+			StatusCode: 200,
+			Body:       fmt.Sprintf(`{"error": "%s"}`, errStr),
+		}, nil
 	}
+	fmt.Printf("Execution completed successfully for submission %s\n", submission.ID)
+
+	// Update status to "completed"
+	fmt.Printf("Updating final status for submission %s\n", submission.ID)
+	if err := db.UpdateSubmissionStatus(ctx, submission.ID, "completed", &result); err != nil {
+		fmt.Printf("Failed to update final status: %v\n", err)
+		return events.APIGatewayProxyResponse{
+			StatusCode: 500,
+			Body:       fmt.Sprintf(`{"error": "Failed to update status: %v"}`, err),
+		}, nil
+	}
+	fmt.Printf("Successfully completed submission %s\n", submission.ID)
+
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Body:       `{"status": "success"}`,
+	}, nil
 }
 
-func executeCPP(code string, problemID string) (string, error) {
-	problem, err := db.GetProblem(context.Background(), problemID)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch problem: %v", err)
-	}
-
+func executeCpp(ctx context.Context, code string, problemID string) (string, error) {
 	tmpDir, err := os.MkdirTemp("/tmp", "cpp-*")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Write code to file
-	codePath := filepath.Join(tmpDir, "code.cpp")
-	wrappedCode := fmt.Sprintf(`
-		#include <iostream>
-		#include <string>
-		using namespace std;
-
-		%s
-
-		int main() {
-			// Your code will read from stdin
-			%s
-			return 0;
-		}
-	`, code)
-
-	if err := os.WriteFile(codePath, []byte(wrappedCode), 0644); err != nil {
-		return "", fmt.Errorf("failed to write code file: %v", err)
+	codePath := filepath.Join(tmpDir, "solution.cpp")
+	if err := os.WriteFile(codePath, []byte(code), 0644); err != nil {
+		return "", fmt.Errorf("failed to write code: %v", err)
 	}
 
-	// Compile the code
-	execPath := filepath.Join(tmpDir, "code")
-	cmd := exec.Command("g++", "-o", execPath, codePath)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("compilation failed: %v\nOutput: %s", err, output)
-	}
+	fmt.Printf("Wrote code to file: %s\n", codePath)
 
-	// Create input file
-	inputPath := filepath.Join(tmpDir, "input.txt")
-	if err := os.WriteFile(inputPath, []byte(problem.Input), 0644); err != nil {
-		return "", fmt.Errorf("failed to write input file: %v", err)
-	}
-
-	// Create output file
-	outputPath := filepath.Join(tmpDir, "output.txt")
-	outputFile, err := os.Create(outputPath)
+	// Get problem from DynamoDB
+	problem, err := db.GetProblem(ctx, problemID)
 	if err != nil {
-		return "", fmt.Errorf("failed to create output file: %v", err)
+		return "", fmt.Errorf("failed to get problem: %v", err)
 	}
-	defer outputFile.Close()
+
+	exePath := filepath.Join(tmpDir, "solution")
+	fmt.Printf("Retrieved problem: %+v\n", problem)
+
+	fmt.Println("Compiling code...")
+	cmd := exec.Command("/opt/gcc/gcc/bin/g++", "-B/opt/gcc/gcc/bin", "-std=c++14", "-o", exePath, codePath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Printf("Compilation error: %v, output: %s\n", err, string(out))
+		return "", fmt.Errorf("compilation error: %v, output: %s", err, string(out))
+	}
+	fmt.Println("Compilation successful")
 
 	// Run the compiled program
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cmd = exec.CommandContext(ctx, execPath)
-	cmd.Dir = tmpDir
-
-	inputFile, err := os.Open(inputPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to open input file: %v", err)
-	}
-	defer inputFile.Close()
-
-	cmd.Stdin = inputFile
-	cmd.Stdout = outputFile
-	cmd.Stderr = outputFile
-
+	fmt.Println("Executing code...")
+	cmd = exec.Command(exePath)
+	cmd.Stdin = strings.NewReader(problem.Input)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("execution timed out")
-		}
-		return "", fmt.Errorf("execution failed: %v", err)
+		fmt.Printf("Execution error: %v, stderr: %s\n", err, stderr.String())
+		return "", fmt.Errorf("execution error: %v, output: %s", err, stderr.String())
 	}
+	fmt.Printf("Execution complete. stdout: %s, stderr: %s\n", stdout.String(), stderr.String())
 
-	// Read and compare output
-	output, err := os.ReadFile(outputPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read output: %v", err)
-	}
-
-	actualOutput := strings.TrimSpace(string(output))
-	expectedOutput := strings.TrimSpace(problem.Output)
-
-	if actualOutput != expectedOutput {
-		return "", fmt.Errorf("output mismatch\nExpected:\n%s\nGot:\n%s", expectedOutput, actualOutput)
-	}
-
-	return actualOutput, nil
+	return strings.TrimSpace(stdout.String()), nil
 }
 
 func main() {

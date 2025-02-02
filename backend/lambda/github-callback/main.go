@@ -16,6 +16,10 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	dbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
 type GithubUser struct {
@@ -57,29 +61,65 @@ func handleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 		}, nil
 	}
 
-	// Save user to DynamoDB
-	user := &types.User{
-		ID:          fmt.Sprintf("%d", githubUser.ID),
-		Username:    githubUser.Login,
-		AccessToken: token,
-		CreatedAt:   time.Now().Unix(),
-		LastLoginAt: time.Now().Unix(),
-	}
-
-	if err := db.SaveUser(ctx, user); err != nil {
+	// First check if user exists
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
 		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
-			Body:       fmt.Sprintf(`{"error": "Failed to save user: %v"}`, err),
+			Body:       fmt.Sprintf(`{"error": "Failed to load AWS config: %v"}`, err),
 		}, nil
+	}
+
+	client := dynamodb.NewFromConfig(cfg)
+
+	// Get user from DynamoDB
+	result, err := client.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(os.Getenv("USERS_TABLE")),
+		Key: map[string]dbtypes.AttributeValue{
+			"id": &dbtypes.AttributeValueMemberS{Value: fmt.Sprintf("%d", githubUser.ID)},
+		},
+	})
+
+	var shouldSaveUser bool
+	if err != nil {
+		// Handle actual errors
+		if !strings.Contains(err.Error(), "ResourceNotFoundException") {
+			return events.APIGatewayProxyResponse{
+				StatusCode: 500,
+				Body:       fmt.Sprintf(`{"error": "Failed to check user: %v"}`, err),
+			}, nil
+		}
+		shouldSaveUser = true
+	} else {
+		// If no item found, save the user
+		shouldSaveUser = len(result.Item) == 0
+	}
+
+	if shouldSaveUser {
+		// Save user to DynamoDB
+		user := &types.User{
+			ID:          fmt.Sprintf("%d", githubUser.ID), // Convert ID to string
+			Login:       githubUser.Login,
+			Token:       token,
+			CreatedAt:   time.Now().Unix(),
+			LastLoginAt: time.Now().Unix(),
+		}
+
+		if err := db.SaveUser(ctx, user); err != nil {
+			return events.APIGatewayProxyResponse{
+				StatusCode: 500,
+				Body:       fmt.Sprintf(`{"error": "Failed to save user: %v"}`, err),
+			}, nil
+		}
 	}
 
 	// Return success with token
 	return events.APIGatewayProxyResponse{
-		StatusCode: 200,
+		StatusCode: 302, // Redirect status code
 		Headers: map[string]string{
-			"Content-Type": "application/json",
+			"Location": fmt.Sprintf("%s/auth/callback?token=%s", os.Getenv("FRONTEND_URL"), token),
 		},
-		Body: fmt.Sprintf(`{"token": "%s"}`, token),
+		Body: "",
 	}, nil
 }
 

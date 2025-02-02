@@ -9,7 +9,6 @@ export default function LoginPage() {
 
   useEffect(() => {
     const token = localStorage.getItem('auth_token')
-    console.log('Login: Token retrieved:', token)
     if (token) {
       router.push('/problems')
     }

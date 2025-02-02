@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,30 +17,21 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 )
 
-func handleRequest(ctx context.Context, event events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	// Validate Momento webhook signature
-	if !validateMomentoSignature(event) {
-		return events.APIGatewayV2HTTPResponse{
-			StatusCode: 401,
-			Body:       `{"error": "Invalid signature"}`,
-		}, nil
-	}
-
-	// Parse webhook payload
-	var webhookPayload struct {
+func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// Parse webhook payload; expect a 'text' field containing the submission JSON.
+	var payload struct {
 		Text string `json:"text"`
 	}
-	if err := json.Unmarshal([]byte(event.Body), &webhookPayload); err != nil {
-		return events.APIGatewayV2HTTPResponse{
+	if err := json.Unmarshal([]byte(event.Body), &payload); err != nil {
+		return events.APIGatewayProxyResponse{
 			StatusCode: 400,
 			Body:       fmt.Sprintf(`{"error": "Invalid payload: %v"}`, err),
 		}, nil
 	}
 
-	// Parse submission from webhook text
 	var submission types.Submission
-	if err := json.Unmarshal([]byte(webhookPayload.Text), &submission); err != nil {
-		return events.APIGatewayV2HTTPResponse{
+	if err := json.Unmarshal([]byte(payload.Text), &submission); err != nil {
+		return events.APIGatewayProxyResponse{
 			StatusCode: 400,
 			Body:       fmt.Sprintf(`{"error": "Invalid submission: %v"}`, err),
 		}, nil
@@ -51,18 +39,18 @@ func handleRequest(ctx context.Context, event events.APIGatewayV2HTTPRequest) (e
 
 	// Update status to running
 	if err := db.UpdateSubmissionStatus(ctx, submission.ID, "running", nil); err != nil {
-		return events.APIGatewayV2HTTPResponse{
+		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
 			Body:       fmt.Sprintf(`{"error": "Failed to update status: %v"}`, err),
 		}, nil
 	}
 
 	// Execute code
-	result, err := executePython(submission.Code, submission.ProblemID)
+	result, err := executePython(ctx, submission.Code, submission.ProblemID)
 	if err != nil {
 		errStr := err.Error()
 		db.UpdateSubmissionStatus(ctx, submission.ID, "error", &errStr)
-		return events.APIGatewayV2HTTPResponse{
+		return events.APIGatewayProxyResponse{
 			StatusCode: 200, // Still return 200 as the webhook was processed
 			Body:       fmt.Sprintf(`{"error": "%s"}`, errStr),
 		}, nil
@@ -70,33 +58,19 @@ func handleRequest(ctx context.Context, event events.APIGatewayV2HTTPRequest) (e
 
 	// Update status to completed
 	if err := db.UpdateSubmissionStatus(ctx, submission.ID, "completed", &result); err != nil {
-		return events.APIGatewayV2HTTPResponse{
+		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
 			Body:       fmt.Sprintf(`{"error": "Failed to update status: %v"}`, err),
 		}, nil
 	}
 
-	return events.APIGatewayV2HTTPResponse{
+	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
 		Body:       `{"status": "success"}`,
 	}, nil
 }
 
-func validateMomentoSignature(event events.APIGatewayV2HTTPRequest) bool {
-	signature := event.Headers["momento-signature"]
-	if signature == "" {
-		return false
-	}
-
-	secret := []byte(os.Getenv("MOMENTO_WEBHOOK_SECRET"))
-	h := hmac.New(sha256.New, secret)
-	h.Write([]byte(event.Body))
-	expectedMAC := hex.EncodeToString(h.Sum(nil))
-
-	return hmac.Equal([]byte(signature), []byte(expectedMAC))
-}
-
-func executePython(code string, problemID string) (string, error) {
+func executePython(ctx context.Context, code string, problemID string) (string, error) {
 	problem, err := db.GetProblem(context.Background(), problemID)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch problem: %v", err)

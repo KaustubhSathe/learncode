@@ -10,7 +10,6 @@ require (
 	github.com/aws/aws-cdk-go/awscdkapigatewayv2integrationsalpha/v2 v2.114.1-alpha.0
 	github.com/aws/aws-cdk-go/awscdklambdagoalpha/v2 v2.177.0-alpha.0
 	github.com/aws/aws-lambda-go v1.47.0
-	github.com/aws/aws-sdk-go v1.55.6
 	github.com/aws/aws-sdk-go-v2 v1.36.0
 	github.com/aws/aws-sdk-go-v2/config v1.29.3
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.18.0

@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"learncode/backend/types"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -29,40 +29,98 @@ type SubmitRequest struct {
 	Code      string `json:"code"`
 }
 
-func handleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+func verifyGitHubToken(token string) (string, error) {
+	// Remove "Bearer " prefix if present
+	token = strings.TrimPrefix(token, "Bearer ")
+
+	// Make request to GitHub API to verify token
+	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("invalid token")
+	}
+
+	// Parse the response to get user ID
+	var user struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return "", fmt.Errorf("failed to parse response: %v", err)
+	}
+
+	return fmt.Sprintf("%d", user.ID), nil
+}
+
+func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	fmt.Printf("Received submit request with headers: %+v\n", event.Headers)
+	fmt.Printf("Request body: %s\n", event.Body)
+
 	// Parse request body
-	var submitReq SubmitRequest
-	if err := json.Unmarshal([]byte(request.Body), &submitReq); err != nil {
+	var req SubmitRequest
+	if err := json.Unmarshal([]byte(event.Body), &req); err != nil {
+		fmt.Printf("Error parsing request body: %v\n", err)
 		return events.APIGatewayProxyResponse{
 			StatusCode: 400,
 			Body:       fmt.Sprintf(`{"error": "Invalid request body: %v"}`, err),
 		}, nil
 	}
 
+	fmt.Printf("Parsed request: ProblemID=%s, Language=%s, Code length=%d\n",
+		req.ProblemID, req.Language, len(req.Code))
+
 	// Validate language
-	if !isValidLanguage(submitReq.Language) {
+	if !isValidLanguage(req.Language) {
 		return events.APIGatewayProxyResponse{
 			StatusCode: 400,
 			Body:       `{"error": "Invalid language. Supported languages: nodejs, cpp, java, python"}`,
 		}, nil
 	}
 
-	// Get user ID from token
-	userID := getUserIDFromToken(request.Headers["Authorization"])
-	if userID == "" {
+	// Validate token
+	authToken := event.Headers["Authorization"]
+	if authToken == "" {
+		authToken = event.Headers["authorization"]
+	}
+	fmt.Printf("Auth token present: %v\n", authToken != "")
+
+	if authToken == "" {
 		return events.APIGatewayProxyResponse{
 			StatusCode: 401,
-			Body:       `{"error": "Invalid token"}`,
+			Body:       `{"error": "No authorization token provided"}`,
 		}, nil
 	}
+
+	// Verify token with GitHub
+	userID, err := verifyGitHubToken(authToken)
+	if err != nil {
+		fmt.Printf("Token verification failed: %v\n", err)
+		return events.APIGatewayProxyResponse{
+			StatusCode: 401,
+			Body:       fmt.Sprintf(`{"error": "Invalid token: %v"}`, err),
+		}, nil
+	}
+
+	fmt.Printf("Token verified for user: %s\n", userID)
 
 	// Create submission record
 	submission := types.Submission{
 		ID:        uuid.New().String(),
 		UserID:    userID,
-		ProblemID: submitReq.ProblemID,
-		Language:  submitReq.Language,
-		Code:      submitReq.Code,
+		ProblemID: req.ProblemID,
+		Language:  req.Language,
+		Code:      req.Code,
 		Status:    "pending",
 		CreatedAt: time.Now().Unix(),
 		UpdatedAt: time.Now().Unix(),
@@ -84,6 +142,7 @@ func handleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 		}, nil
 	}
 
+	fmt.Println("Returning successful response")
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
 		Headers: map[string]string{
@@ -123,9 +182,10 @@ func saveSubmission(ctx context.Context, submission *types.Submission) error {
 }
 
 func publishToMomento(ctx context.Context, submission types.Submission) error {
-	credentialProvider, err := auth.NewEnvMomentoTokenProvider("MOMENTO_API_KEY")
+	credentialProvider, err := auth.NewEnvMomentoTokenProvider("MOMENTO_AUTH_TOKEN")
 	if err != nil {
-		log.Fatalf("Error loading Momento API key: %v", err)
+		log.Printf("Error loading Momento auth token: %v", err)
+		return fmt.Errorf("failed to load Momento auth token: %v", err)
 	}
 
 	client, err := momento.NewTopicClient(config.TopicsDefault(), credentialProvider)
@@ -140,7 +200,7 @@ func publishToMomento(ctx context.Context, submission types.Submission) error {
 	// Publish submission to appropriate topic
 	message, _ := json.Marshal(submission)
 	if _, err := client.Publish(ctx, &momento.TopicPublishRequest{
-		CacheName: "default",
+		CacheName: "learncode-cache",
 		TopicName: topicName,
 		Value:     momento.Bytes(message),
 	}); err != nil {
@@ -148,34 +208,6 @@ func publishToMomento(ctx context.Context, submission types.Submission) error {
 	}
 
 	return nil
-}
-
-func getUserIDFromToken(token string) string {
-	if token == "" {
-		return ""
-	}
-
-	// Parse JWT token
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return ""
-	}
-
-	// Decode the payload (second part)
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return ""
-	}
-
-	// Parse the JSON payload
-	var claims struct {
-		Sub string `json:"sub"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return ""
-	}
-
-	return claims.Sub
 }
 
 func main() {

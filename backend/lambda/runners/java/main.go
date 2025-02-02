@@ -4,173 +4,94 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"learncode/backend/db"
 	"learncode/backend/types"
 
+	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/momentohq/client-sdk-go/auth"
-	momentoconfig "github.com/momentohq/client-sdk-go/config"
-	"github.com/momentohq/client-sdk-go/momento"
 )
 
-func handleRequest(ctx context.Context) error {
-	credentialProvider, err := auth.NewEnvMomentoTokenProvider("MOMENTO_API_KEY")
+func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// Parse webhook payload; expect a "text" field containing the submission JSON.
+	var payload struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal([]byte(event.Body), &payload); err != nil {
+		return events.APIGatewayProxyResponse{
+			StatusCode: 400,
+			Body:       fmt.Sprintf(`{"error": "Invalid payload: %v"}`, err),
+		}, nil
+	}
+
+	var submission types.Submission
+	if err := json.Unmarshal([]byte(payload.Text), &submission); err != nil {
+		return events.APIGatewayProxyResponse{
+			StatusCode: 400,
+			Body:       fmt.Sprintf(`{"error": "Invalid submission: %v"}`, err),
+		}, nil
+	}
+
+	if err := db.UpdateSubmissionStatus(ctx, submission.ID, "running", nil); err != nil {
+		return events.APIGatewayProxyResponse{
+			StatusCode: 500,
+			Body:       fmt.Sprintf(`{"error": "Failed to update status: %v"}`, err),
+		}, nil
+	}
+
+	result, err := executeJava(ctx, submission.Code, submission.ProblemID)
 	if err != nil {
-		log.Fatalf("Error loading Momento API key: %v", err)
+		errStr := err.Error()
+		db.UpdateSubmissionStatus(ctx, submission.ID, "error", &errStr)
+		return events.APIGatewayProxyResponse{
+			StatusCode: 200,
+			Body:       fmt.Sprintf(`{"error": "%s"}`, errStr),
+		}, nil
 	}
 
-	client, err := momento.NewTopicClient(momentoconfig.TopicsDefault(), credentialProvider)
-	if err != nil {
-		return fmt.Errorf("failed to create Momento client: %v", err)
-	}
-	defer client.Close()
-
-	subscription, err := client.Subscribe(ctx, &momento.TopicSubscribeRequest{
-		CacheName: "default",
-		TopicName: "learncode-java",
-	})
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to topic: %v", err)
+	if err := db.UpdateSubmissionStatus(ctx, submission.ID, "completed", &result); err != nil {
+		return events.APIGatewayProxyResponse{
+			StatusCode: 500,
+			Body:       fmt.Sprintf(`{"error": "Failed to update status: %v"}`, err),
+		}, nil
 	}
 
-	for {
-		event, err := subscription.Event(ctx)
-		if err != nil {
-			log.Printf("Error receiving event: %v", err)
-			continue
-		}
-
-		switch e := event.(type) {
-		case momento.TopicItem:
-			var submission types.Submission
-			if err := json.Unmarshal(e.GetValue().(momento.Bytes), &submission); err != nil {
-				fmt.Printf("Error unmarshaling message: %v\n", err)
-				continue
-			}
-
-			if err := db.UpdateSubmissionStatus(ctx, submission.ID, "running", nil); err != nil {
-				fmt.Printf("Error updating status to running: %v\n", err)
-				continue
-			}
-
-			result, err := executeJava(submission.Code, submission.ProblemID)
-			if err != nil {
-				errStr := err.Error()
-				db.UpdateSubmissionStatus(ctx, submission.ID, "error", &errStr)
-				continue
-			}
-
-			if err := db.UpdateSubmissionStatus(ctx, submission.ID, "completed", &result); err != nil {
-				fmt.Printf("Error updating status to completed: %v\n", err)
-			}
-
-		case momento.TopicHeartbeat:
-			fmt.Printf("Received heartbeat\n")
-
-		case momento.TopicDiscontinuity:
-			fmt.Printf("Received discontinuity - some messages may have been missed\n")
-		}
-	}
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Body:       `{"status": "success"}`,
+	}, nil
 }
 
-func executeJava(code string, problemID string) (string, error) {
-	problem, err := db.GetProblem(context.Background(), problemID)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch problem: %v", err)
-	}
-
+func executeJava(ctx context.Context, code string, problemID string) (string, error) {
 	tmpDir, err := os.MkdirTemp("/tmp", "java-*")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Write code to file
 	codePath := filepath.Join(tmpDir, "Solution.java")
-	wrappedCode := fmt.Sprintf(`
-		import java.util.*;
-
-		public class Solution {
-			%s
-
-			public static void main(String[] args) {
-				Scanner scanner = new Scanner(System.in);
-				// Your code will read from System.in
-				%s
-			}
-		}
-	`, code)
-
-	if err := os.WriteFile(codePath, []byte(wrappedCode), 0644); err != nil {
-		return "", fmt.Errorf("failed to write code file: %v", err)
+	if err := os.WriteFile(codePath, []byte(code), 0644); err != nil {
+		return "", fmt.Errorf("failed to write code: %v", err)
 	}
 
-	// Compile the code
-	compileCmd := exec.Command("javac", "Solution.java")
-	compileCmd.Dir = tmpDir
-	if output, err := compileCmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("compilation failed: %v\nOutput: %s", err, output)
+	// Compile the Java code
+	cmd := exec.CommandContext(ctx, "javac", codePath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("compilation error: %v, output: %s", err, string(out))
 	}
 
-	// Create input file
-	inputPath := filepath.Join(tmpDir, "input.txt")
-	if err := os.WriteFile(inputPath, []byte(problem.Input), 0644); err != nil {
-		return "", fmt.Errorf("failed to write input file: %v", err)
-	}
-
-	// Create output file
-	outputPath := filepath.Join(tmpDir, "output.txt")
-	outputFile, err := os.Create(outputPath)
+	// Run the compiled code (assuming the main class is Solution)
+	cmd = exec.CommandContext(ctx, "java", "-cp", tmpDir, "Solution")
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("failed to create output file: %v", err)
-	}
-	defer outputFile.Close()
-
-	// Run the compiled program
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "java", "Solution")
-	cmd.Dir = tmpDir
-
-	inputFile, err := os.Open(inputPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to open input file: %v", err)
-	}
-	defer inputFile.Close()
-
-	cmd.Stdin = inputFile
-	cmd.Stdout = outputFile
-	cmd.Stderr = outputFile
-
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("execution timed out")
-		}
-		return "", fmt.Errorf("execution failed: %v", err)
+		return "", fmt.Errorf("execution error: %v, output: %s", err, string(output))
 	}
 
-	// Read and compare output
-	output, err := os.ReadFile(outputPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read output: %v", err)
-	}
-
-	actualOutput := strings.TrimSpace(string(output))
-	expectedOutput := strings.TrimSpace(problem.Output)
-
-	if actualOutput != expectedOutput {
-		return "", fmt.Errorf("output mismatch\nExpected:\n%s\nGot:\n%s", expectedOutput, actualOutput)
-	}
-
-	return actualOutput, nil
+	return strings.TrimSpace(string(output)), nil
 }
 
 func main() {

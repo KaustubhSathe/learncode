@@ -3,101 +3,167 @@
 import { useState, useEffect } from "react"
 import Editor from "@monaco-editor/react"
 import { ChevronDown, ChevronUp, Play } from "lucide-react"
-import { submitCode, getSubmissionStatus } from '@/lib/submission'
-import { supabase } from '@/lib/supabase'
+import { useRouter } from 'next/navigation'
+import { Problem, User } from '@/types'
 
-const defaultCode = `function solution(nums, target) {
-  // Write your code here
-}`
+const defaultCode = "// Write your solution here\n"
 
 export default function ProblemPage({ params }: { params: { id: string } }) {
+  const router = useRouter()
+  const [problem, setProblem] = useState<Problem | null>(null)
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [code, setCode] = useState(defaultCode)
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(true)
   const [output, setOutput] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [testInput, setTestInput] = useState("")
   const [expectedOutput, setExpectedOutput] = useState("")
+  const [language, setLanguage] = useState('nodejs')
 
   useEffect(() => {
-    // Fetch problem details including input and output
     const fetchProblem = async () => {
-      const { data: problem } = await supabase
-        .from('problems')
-        .select('*')
-        .is('deleted_at', null)
-        .eq('id', params.id)
-        .single()
+      try {
+        const token = localStorage.getItem('auth_token')
+        console.log('Problem page - Token:', token ? 'present' : 'missing')
+        
+        if (!token) {
+          router.push('/')
+          return
+        }
 
-      if (problem) {
-        setTestInput(problem.input)
-        setExpectedOutput(problem.output)
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/problems/${params.id}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        })
+        console.log('Response status:', response.status)
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          console.log('Error response:', errorText)
+          throw new Error('Failed to fetch problem')
+        }
+
+        const data = await response.json()
+        console.log('Problem data:', data)
+        
+        setProblem(data.problem)
+        setUser(data.user)
+        setTestInput(data.problem.input)
+        setExpectedOutput(data.problem.output)
+      } catch (err) {
+        console.error('Fetch error:', err)
+        setError(err instanceof Error ? err.message : 'An error occurred')
+      } finally {
+        setLoading(false)
       }
     }
 
     fetchProblem()
-  }, [params.id])
+  }, [params.id, router])
 
   const handleSubmit = async () => {
     try {
       setIsSubmitting(true)
-      const submission = await submitCode({
-        problemId: parseInt(params.id),
+      const token = localStorage.getItem('auth_token')
+      console.log('Submit - Token:', token ? 'present' : 'missing')
+      if (!token) {
+        throw new Error('Not authenticated')
+      }
+
+      const submitData = {
+        problem_id: params.id,
         code,
-        language: 'javascript', // or get from state if you have language selection
+        language,
+      }
+      console.log('Submit - Request data:', submitData)
+
+      // Submit to our backend API
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/submit`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(submitData),
       })
+      console.log('Submit - Response status:', response.status)
 
-      // Poll for submission status
-      const interval = setInterval(async () => {
-        const status = await getSubmissionStatus(submission.id)
-        if (status.completed_at) {
-          clearInterval(interval)
-          setOutput(JSON.stringify(status.results, null, 2))
-        }
-      }, 1000)
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Submit - Error response:', errorText)
+        throw new Error('Failed to submit code')
+      }
 
+      const submission = await response.json()
+      console.log('Submit - Submission created:', submission)
     } catch (error) {
-      console.error('Error submitting code:', error)
-      setOutput('Error submitting code')
+      console.error('Submit - Caught error:', error)
+      setOutput(error instanceof Error ? error.message : 'Failed to submit code')
     } finally {
       setIsSubmitting(false)
+      console.log('Submit - Completed')
     }
   }
 
+  if (loading) return <div>Loading...</div>
+  if (error) return <div>Error: {error}</div>
+  if (!problem) return <div>Problem not found</div>
+
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col">
-      {/* Problem Description */}
-      <div className="border-b">
+    <div className="container mx-auto px-4 py-8">
+      <div className="flex justify-between items-center mb-8">
+        <div>
+          {user && <h2 className="text-xl font-bold">Welcome, {user.login}!</h2>}
+        </div>
         <button
-          onClick={() => setIsDescriptionExpanded(!isDescriptionExpanded)}
-          className="flex items-center justify-between w-full p-4 text-left"
+          onClick={() => {
+            localStorage.removeItem('auth_token')
+            router.push('/')
+          }}
+          className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
         >
-          <h1 className="text-xl font-bold">Two Sum</h1>
-          {isDescriptionExpanded ? <ChevronUp /> : <ChevronDown />}
+          Logout
         </button>
-        {isDescriptionExpanded && (
-          <div className="px-4 pb-4 space-y-4">
-            <p>
-              Given an array of integers nums and an integer target, return indices
-              of the two numbers such that they add up to target.
-            </p>
-            <div className="space-y-2">
-              <h3 className="font-medium">Example 1:</h3>
-              <pre className="bg-muted p-2 rounded-md">
-                Input: nums = [2,7,11,15], target = 9{"\n"}
-                Output: [0,1]{"\n"}
-                Explanation: Because nums[0] + nums[1] == 9, we return [0, 1].
-              </pre>
-            </div>
-          </div>
-        )}
+      </div>
+      
+      <div className="mb-8">
+        <div className="flex justify-between items-center mb-4">
+          <h1 className="text-3xl font-bold">{problem.title}</h1>
+          <span className={`px-3 py-1 rounded-full text-sm ${
+            problem.difficulty === 'Easy' ? 'bg-green-100 text-green-800' :
+            problem.difficulty === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
+            'bg-red-100 text-red-800'
+          }`}>
+            {problem.difficulty}
+          </span>
+        </div>
+        
+        <div className="prose max-w-none">
+          <h3 className="text-xl font-semibold mb-2">Description</h3>
+          <p className="mb-4">{problem.description}</p>
+          
+          <h3 className="text-xl font-semibold mb-2">Example Input</h3>
+          <pre className="bg-gray-100 p-4 rounded-lg mb-4">{problem.input}</pre>
+          
+          <h3 className="text-xl font-semibold mb-2">Expected Output</h3>
+          <pre className="bg-gray-100 p-4 rounded-lg">{problem.output}</pre>
+        </div>
       </div>
 
       {/* Code Editor and Output */}
       <div className="flex-1 grid grid-cols-2 gap-4 p-4">
         <div className="flex flex-col space-y-4">
           <div className="flex items-center justify-between">
-            <select className="bg-background border rounded-md px-2 py-1">
-              <option value="javascript">JavaScript</option>
+            <select 
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="bg-background border rounded-md px-2 py-1"
+            >
+              <option value="nodejs">Node.js</option>
               <option value="python">Python</option>
               <option value="cpp">C++</option>
               <option value="java">Java</option>
@@ -113,7 +179,7 @@ export default function ProblemPage({ params }: { params: { id: string } }) {
           <div className="flex-1 border rounded-md overflow-hidden">
             <Editor
               height="100%"
-              defaultLanguage="javascript"
+              defaultLanguage={language}
               theme="vs-dark"
               value={code}
               onChange={(value) => setCode(value || "")}
@@ -131,15 +197,15 @@ export default function ProblemPage({ params }: { params: { id: string } }) {
           <h2 className="font-medium">Test Cases</h2>
           <div className="flex-1 border rounded-md p-4 space-y-4">
             <div className="space-y-2">
-              <h3 className="text-sm font-medium">Test Case 1:</h3>
+              <h3 className="text-sm font-medium">Input:</h3>
               <pre className="bg-muted p-2 rounded-md text-sm">
-                nums = [2,7,11,15], target = 9
+                {problem.input}
               </pre>
             </div>
             <div className="space-y-2">
-              <h3 className="text-sm font-medium">Test Case 2:</h3>
+              <h3 className="text-sm font-medium">Expected Output:</h3>
               <pre className="bg-muted p-2 rounded-md text-sm">
-                nums = [3,2,4], target = 6
+                {problem.output}
               </pre>
             </div>
             {output && (
