@@ -127,7 +127,11 @@ func executeCpp(ctx context.Context, code string, problemID string) (string, err
 	fmt.Printf("Retrieved problem: %+v\n", problem)
 
 	fmt.Println("Compiling code...")
-	cmd := exec.Command("/opt/gcc/gcc/bin/g++", "-B/opt/gcc/gcc/bin", "-std=c++14", "-o", exePath, codePath)
+	cmd := exec.Command("/opt/gcc/bin/g++", "-B/opt/gcc/bin", "-std=c++14", "-o", exePath, codePath)
+	cmd.Env = append(os.Environ(),
+		"LD_LIBRARY_PATH=/opt/gcc/bin",
+		"CPLUS_INCLUDE_PATH=/opt/gcc/include",
+	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("Compilation error: %v, output: %s\n", err, string(out))
 		return "", fmt.Errorf("compilation error: %v, output: %s", err, string(out))
