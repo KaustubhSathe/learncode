@@ -165,7 +165,6 @@ export default function ProblemPage({ params }: { params: { id: string } }) {
             >
               <option value="nodejs">Node.js</option>
               <option value="python">Python</option>
-              <option value="cpp">C++</option>
               <option value="java">Java</option>
             </select>
             <button

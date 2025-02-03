@@ -183,18 +183,8 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		},
 	})
 
-	// Create GCC Lambda Layer
-	gccLayer := awslambda.NewLayerVersion(stack, jsii.String("GccLayer"), &awslambda.LayerVersionProps{
-		LayerVersionName: jsii.String("gcc"),
-		Description:      jsii.String("GCC compiler"),
-		Code:             awslambda.Code_FromAsset(jsii.String("lambda/layers/gcc"), nil),
-		CompatibleRuntimes: &[]awslambda.Runtime{
-			awslambda.Runtime_PROVIDED_AL2(),
-		},
-	})
-
 	// Runner Lambdas
-	nodejsRunner := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("node-runner"), &awscdklambdagoalpha.GoFunctionProps{
+	nodejsRunner := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("nodejs-runner"), &awscdklambdagoalpha.GoFunctionProps{
 		Runtime:    awslambda.Runtime_PROVIDED_AL2(),
 		Entry:      jsii.String("lambda/runners/nodejs"),
 		ModuleDir:  jsii.String("."),
@@ -204,49 +194,6 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		Layers: &[]awslambda.ILayerVersion{
 			nodejsLayer,
 		},
-		Bundling: &awscdklambdagoalpha.BundlingOptions{
-			Environment: &map[string]*string{
-				"GOOS":   jsii.String("linux"),
-				"GOARCH": jsii.String("amd64"),
-			},
-		},
-		Environment: &map[string]*string{
-			"PROBLEMS_TABLE":     problemsTable.TableName(),
-			"SUBMISSIONS_TABLE":  submissionsTable.TableName(),
-			"MOMENTO_AUTH_TOKEN": jsii.String(os.Getenv("MOMENTO_AUTH_TOKEN")),
-		},
-	})
-
-	cppRunner := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("cpp-runner"), &awscdklambdagoalpha.GoFunctionProps{
-		Runtime:    awslambda.Runtime_PROVIDED_AL2(),
-		Entry:      jsii.String("lambda/runners/cpp"),
-		ModuleDir:  jsii.String("."),
-		Timeout:    awscdk.Duration_Seconds(jsii.Number(30)),
-		MemorySize: jsii.Number(512),
-		Role:       runnerRole,
-		Layers: &[]awslambda.ILayerVersion{
-			gccLayer,
-		},
-		Bundling: &awscdklambdagoalpha.BundlingOptions{
-			Environment: &map[string]*string{
-				"GOOS":   jsii.String("linux"),
-				"GOARCH": jsii.String("amd64"),
-			},
-		},
-		Environment: &map[string]*string{
-			"PROBLEMS_TABLE":     problemsTable.TableName(),
-			"SUBMISSIONS_TABLE":  submissionsTable.TableName(),
-			"MOMENTO_AUTH_TOKEN": jsii.String(os.Getenv("MOMENTO_AUTH_TOKEN")),
-		},
-	})
-
-	javaRunner := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("java-runner"), &awscdklambdagoalpha.GoFunctionProps{
-		Runtime:    awslambda.Runtime_PROVIDED_AL2(),
-		Entry:      jsii.String("lambda/runners/java"),
-		ModuleDir:  jsii.String("."),
-		Timeout:    awscdk.Duration_Seconds(jsii.Number(30)),
-		MemorySize: jsii.Number(512),
-		Role:       runnerRole,
 		Bundling: &awscdklambdagoalpha.BundlingOptions{
 			Environment: &map[string]*string{
 				"GOOS":   jsii.String("linux"),
@@ -280,25 +227,33 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		},
 	})
 
+	// Create Java runner
+	javaRunner := awslambda.NewFunction(stack, jsii.String("java-runner"), &awslambda.FunctionProps{
+		Runtime:    awslambda.Runtime_JAVA_11(),
+		Handler:    jsii.String("main.java.Handler::handleRequest"),
+		Code:       awslambda.Code_FromAsset(jsii.String("lambda/runners/java/build/libs/java-runner.zip"), nil),
+		Timeout:    awscdk.Duration_Seconds(jsii.Number(30)),
+		MemorySize: jsii.Number(512),
+		Role:       runnerRole,
+		Environment: &map[string]*string{
+			"PROBLEMS_TABLE":     problemsTable.TableName(),
+			"SUBMISSIONS_TABLE":  submissionsTable.TableName(),
+			"MOMENTO_AUTH_TOKEN": jsii.String(os.Getenv("MOMENTO_AUTH_TOKEN")),
+		},
+	})
+
 	// Grant DynamoDB permissions
-	problemsTable.GrantReadData(cppRunner)
-	submissionsTable.GrantWriteData(cppRunner)
-	problemsTable.GrantReadData(javaRunner)
-	submissionsTable.GrantWriteData(javaRunner)
 	problemsTable.GrantReadData(pythonRunner)
 	submissionsTable.GrantWriteData(pythonRunner)
+	problemsTable.GrantReadData(nodejsRunner)
+	submissionsTable.GrantWriteData(nodejsRunner)
+	problemsTable.GrantReadData(javaRunner)
+	submissionsTable.GrantWriteData(javaRunner)
 
 	nodejsRunner.Role().AddManagedPolicy(
 		awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("AWSLambdaExecute")),
 	)
-
-	problemsTable.GrantReadData(nodejsRunner)
-	submissionsTable.GrantWriteData(nodejsRunner)
-
-	cppRunner.Role().AddManagedPolicy(
-		awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("AWSLambdaExecute")),
-	)
-
+	
 	javaRunner.Role().AddManagedPolicy(
 		awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("AWSLambdaExecute")),
 	)
@@ -307,56 +262,31 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("AWSLambdaExecute")),
 	)
 
-	// Create HTTP API for runners
-	runnersApi := awscdkapigatewayv2alpha.NewHttpApi(stack, jsii.String("RunnersApi"), &awscdkapigatewayv2alpha.HttpApiProps{
-		ApiName: jsii.String("Code Runners API"),
+	// Create Runners API
+	runnersApi := awscdkapigatewayv2alpha.NewHttpApi(stack, jsii.String("runners-api"), &awscdkapigatewayv2alpha.HttpApiProps{
 		CorsPreflight: &awscdkapigatewayv2alpha.CorsPreflightOptions{
-			AllowHeaders: jsii.Strings("momento-signature", "Content-Type"),
+			AllowHeaders: jsii.Strings("*"),
 			AllowMethods: &[]awscdkapigatewayv2alpha.CorsHttpMethod{
-				awscdkapigatewayv2alpha.CorsHttpMethod_POST,
-				awscdkapigatewayv2alpha.CorsHttpMethod_OPTIONS,
+				awscdkapigatewayv2alpha.CorsHttpMethod_ANY,
 			},
 			AllowOrigins: jsii.Strings("*"),
 		},
 	})
 
-	// Add routes for each language runner
+	// Add Node.js runner integration
 	runnersApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
 		Path: jsii.String("/runners/nodejs"),
 		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
 			awscdkapigatewayv2alpha.HttpMethod_POST,
 		},
 		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
-			jsii.String("NodeJSRunnerIntegration"),
+			jsii.String("NodejsIntegration"),
 			nodejsRunner,
 			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
 		),
 	})
 
-	runnersApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
-		Path: jsii.String("/runners/cpp"),
-		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
-			awscdkapigatewayv2alpha.HttpMethod_POST,
-		},
-		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
-			jsii.String("CppRunnerIntegration"),
-			cppRunner,
-			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
-		),
-	})
-
-	runnersApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
-		Path: jsii.String("/runners/java"),
-		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
-			awscdkapigatewayv2alpha.HttpMethod_POST,
-		},
-		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
-			jsii.String("JavaRunnerIntegration"),
-			javaRunner,
-			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
-		),
-	})
-
+	// Add Python runner integration
 	runnersApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
 		Path: jsii.String("/runners/python"),
 		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
@@ -365,6 +295,19 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
 			jsii.String("PythonRunnerIntegration"),
 			pythonRunner,
+			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
+		),
+	})
+
+	// Add Java runner integration
+	runnersApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
+		Path: jsii.String("/runners/java"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
+			awscdkapigatewayv2alpha.HttpMethod_POST,
+		},
+		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
+			jsii.String("JavaIntegration"),
+			javaRunner,
 			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
 		),
 	})
