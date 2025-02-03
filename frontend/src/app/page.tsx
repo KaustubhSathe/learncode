@@ -2,17 +2,22 @@
 
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
-import Link from "next/link"
+import { Github } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 export default function Home() {
   const router = useRouter()
-
+  
   useEffect(() => {
     const token = localStorage.getItem('auth_token')
     if (token) {
       router.push('/problems')
     }
   }, [router])
+
+  const handleGitHubLogin = () => {
+    window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/auth/github`
+  }
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] text-center">
@@ -23,12 +28,14 @@ export default function Home() {
         Improve your coding skills by solving programming challenges
       </p>
       <div className="mt-8">
-        <Link 
-          href="/login"
-          className="rounded-md bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90"
+        <Button
+          onClick={handleGitHubLogin}
+          size="lg"
+          className="flex items-center gap-2"
         >
-          Start Practicing
-        </Link>
+          <Github className="w-5 h-5" />
+          Login with GitHub
+        </Button>
       </div>
     </div>
   )

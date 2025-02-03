@@ -173,6 +173,16 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		},
 	})
 
+	// Auth verify Lambda
+	authVerifyLambda := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("AuthVerifyFunction"), &awscdklambdagoalpha.GoFunctionProps{
+		Runtime: awslambda.Runtime_PROVIDED_AL2(),
+		Entry:   jsii.String("lambda/auth-verify"),
+		Role:    lambdaRole,
+		Environment: &map[string]*string{
+			"GITHUB_CLIENT_ID": jsii.String(os.Getenv("GITHUB_CLIENT_ID")),
+		},
+	})
+
 	// Create Node.js Lambda Layer
 	nodejsLayer := awslambda.NewLayerVersion(stack, jsii.String("NodejsLayer"), &awslambda.LayerVersionProps{
 		LayerVersionName: jsii.String("nodejs18"),
@@ -253,7 +263,7 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 	nodejsRunner.Role().AddManagedPolicy(
 		awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("AWSLambdaExecute")),
 	)
-	
+
 	javaRunner.Role().AddManagedPolicy(
 		awsiam.ManagedPolicy_FromAwsManagedPolicyName(jsii.String("AWSLambdaExecute")),
 	)
@@ -383,6 +393,19 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
 			jsii.String("SubmitIntegration"),
 			submitLambda,
+			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
+		),
+	})
+
+	// Add routes
+	httpApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
+		Path: jsii.String("/auth/verify"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
+			awscdkapigatewayv2alpha.HttpMethod_GET,
+		},
+		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
+			jsii.String("AuthVerifyIntegration"),
+			authVerifyLambda,
 			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
 		),
 	})

@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useAuth } from '@/lib/auth'
 
 export default function AuthCallback() {
   const router = useRouter()
@@ -9,7 +10,6 @@ export default function AuthCallback() {
 
   useEffect(() => {
     const token = searchParams.get('token')
-    console.log('Callback: Received token from URL:', token ? 'yes' : 'no')
 
     if (token) {
       try {
@@ -17,12 +17,9 @@ export default function AuthCallback() {
         localStorage.setItem('auth_token', token)
         // Verify token was stored
         const storedToken = localStorage.getItem('auth_token')
-        console.log('Callback: Token stored successfully:', storedToken ? 'yes' : 'no')
         
-        // Small delay to ensure token is stored
-        setTimeout(() => {
-          router.push('/problems')
-        }, 100)
+        // Trigger auth check to update context
+        router.push('/problems')
       } catch (error) {
         router.push('/')
       }

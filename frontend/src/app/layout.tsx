@@ -2,9 +2,7 @@ import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
-import Navbar from "@/components/navbar"
 import { AuthProvider } from "@/lib/auth"
-import AuthCheck from '@/components/auth-check'
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -28,14 +26,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AuthProvider>
-            <AuthCheck>
-              <div className="min-h-screen bg-background">
-                <Navbar />
-                <main className="container mx-auto py-6">
-                  {children}
-                </main>
-              </div>
-            </AuthCheck>
+            {children}
           </AuthProvider>
         </ThemeProvider>
       </body>

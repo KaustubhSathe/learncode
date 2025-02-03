@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useEffect, useState } from "react"
 import { useRouter, usePathname } from "next/navigation"
-import Cookies from 'js-cookie'
 
 interface User {
   id: number
@@ -14,16 +13,39 @@ interface AuthContextType {
   user: User | null
   loading: boolean
   logout: () => void
+  authToken: string | null
+  checkAuth: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   logout: () => {},
+  authToken: null,
+  checkAuth: async () => {},
 })
+
+function AuthContent({ children }: { children: React.ReactNode }) {
+  const { loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div suppressHydrationWarning className="min-h-screen bg-background">
+        <div className="container mx-auto py-6">
+          <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
+            Loading...
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return <>{children}</>
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
+  const [authToken, setAuthToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
   const pathname = usePathname()
@@ -33,11 +55,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const checkAuth = async () => {
-    const token = Cookies.get('auth_token')
+    const token = localStorage.getItem('auth_token')
     if (!token) {
       setLoading(false)
-      if (pathname !== '/login') {
-        router.push('/login')
+      setAuthToken(null)
+      if (pathname !== '/') {
+        router.push('/')
       }
       return
     }
@@ -55,26 +78,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const data = await response.json()
       setUser(data)
+      setAuthToken(token)
+      setLoading(false)
     } catch (error) {
-      console.error('Auth error:', error)
-      Cookies.remove('auth_token')
-      if (pathname !== '/login') {
-        router.push('/login')
+      localStorage.removeItem('auth_token')
+      if (pathname !== '/') {
+        router.push('/')
       }
-    } finally {
+      setAuthToken(null)
       setLoading(false)
     }
   }
 
   const logout = () => {
-    Cookies.remove('auth_token')
+    localStorage.removeItem('auth_token')
     setUser(null)
-    router.push('/login')
+    setAuthToken(null)
+    router.push('/')
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, logout }}>
-      {!loading && children}
+    <AuthContext.Provider value={{ user, loading, logout, authToken, checkAuth }}>
+      <AuthContent>{children}</AuthContent>
     </AuthContext.Provider>
   )
 }
