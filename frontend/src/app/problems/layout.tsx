@@ -12,12 +12,19 @@ export default function ProblemsLayout({
 }) {
   return (
     <AuthProvider>
-            <div className="min-h-screen bg-background">
-      <Navbar />
-      <main className="container mx-auto py-6">
-        {children}
-      </main>
-    </div>
+      <div className="h-screen bg-background flex flex-col">
+        <Navbar />
+        <main className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-2 
+          [&::-webkit-scrollbar-track]:bg-transparent
+          [&::-webkit-scrollbar-thumb]:bg-gray-300 
+          [&::-webkit-scrollbar-thumb:hover]:bg-gray-400
+          dark:[&::-webkit-scrollbar-thumb]:bg-gray-700
+          dark:[&::-webkit-scrollbar-thumb:hover]:bg-gray-600
+          [&::-webkit-scrollbar-thumb]:rounded-full"
+        >
+          {children}
+        </main>
+      </div>
     </AuthProvider>
   )
 } 
