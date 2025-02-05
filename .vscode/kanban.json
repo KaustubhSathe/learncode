@@ -1,0 +1,52 @@
+{
+    "title": "Kanban",
+    "cols": [
+        {
+            "title": "To-Do",
+            "tasks": [
+                {
+                    "text": "ai code assisstant vscode extension/ app builder",
+                    "id": "pirh7xyk2garsff02q7bm06e"
+                },
+                {
+                    "text": "GPT 2 Implementation",
+                    "id": "f5tlvyoy4qu10gw2u33p12ki"
+                },
+                {
+                    "text": "Surfer - Browser Implementation",
+                    "id": "h2nj9f1eqkh5n1rsezb6w64p"
+                },
+                {
+                    "text": "Web Builder\n",
+                    "id": "hyilgkr8321xxqoio8w6v8n3"
+                },
+                {
+                    "text": "Spreadsheet\n\ndsfds",
+                    "id": "ex0omnu4d3q4dz1b2ujczre0"
+                }
+            ],
+            "id": "tgcjw568whq3ujfj7tqnf68m",
+            "color": "#fcb900"
+        },
+        {
+            "title": "Doing",
+            "tasks": [
+                {
+                    "text": "## LearnCode\n\n- tests\n- admin panel \n- run button\n- submit button\n- submission history\nffgdfgdf",
+                    "id": "yg9wuqph526g6em6lomhp1hz"
+                }
+            ],
+            "id": "h4s9koycv7cfebbgm34r6pt3",
+            "color": "#0693e3"
+        },
+        {
+            "title": "Done",
+            "tasks": [],
+            "id": "iycyg9v3d7hqyk1h88szbp62",
+            "color": "#00d084"
+        }
+    ],
+    "autosave": true,
+    "saveToFile": true,
+    "timestamp": 1738699059907
+}
