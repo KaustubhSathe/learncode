@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"learncode/backend/types"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -64,21 +63,14 @@ func verifyGitHubToken(token string) (string, error) {
 }
 
 func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	fmt.Printf("Received submit request with headers: %+v\n", event.Headers)
-	fmt.Printf("Request body: %s\n", event.Body)
-
 	// Parse request body
 	var req SubmitRequest
 	if err := json.Unmarshal([]byte(event.Body), &req); err != nil {
-		fmt.Printf("Error parsing request body: %v\n", err)
 		return events.APIGatewayProxyResponse{
 			StatusCode: 400,
 			Body:       fmt.Sprintf(`{"error": "Invalid request body: %v"}`, err),
 		}, nil
 	}
-
-	fmt.Printf("Parsed request: ProblemID=%s, Language=%s, Code length=%d\n",
-		req.ProblemID, req.Language, len(req.Code))
 
 	// Validate language
 	if !isValidLanguage(req.Language) {
@@ -93,7 +85,6 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	if authToken == "" {
 		authToken = event.Headers["authorization"]
 	}
-	fmt.Printf("Auth token present: %v\n", authToken != "")
 
 	if authToken == "" {
 		return events.APIGatewayProxyResponse{
@@ -105,14 +96,11 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	// Verify token with GitHub
 	userID, err := verifyGitHubToken(authToken)
 	if err != nil {
-		fmt.Printf("Token verification failed: %v\n", err)
 		return events.APIGatewayProxyResponse{
 			StatusCode: 401,
 			Body:       fmt.Sprintf(`{"error": "Invalid token: %v"}`, err),
 		}, nil
 	}
-
-	fmt.Printf("Token verified for user: %s\n", userID)
 
 	// Create submission record
 	submission := types.Submission{
@@ -142,7 +130,6 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 		}, nil
 	}
 
-	fmt.Println("Returning successful response")
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
 		Headers: map[string]string{
@@ -184,7 +171,6 @@ func saveSubmission(ctx context.Context, submission *types.Submission) error {
 func publishToMomento(ctx context.Context, submission types.Submission) error {
 	credentialProvider, err := auth.NewEnvMomentoTokenProvider("MOMENTO_AUTH_TOKEN")
 	if err != nil {
-		log.Printf("Error loading Momento auth token: %v", err)
 		return fmt.Errorf("failed to load Momento auth token: %v", err)
 	}
 

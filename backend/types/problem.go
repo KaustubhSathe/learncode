@@ -10,4 +10,6 @@ type Problem struct {
 	DeletedAt   *int64 `json:"deleted_at,omitempty" dynamodbav:"deleted_at,omitempty"` // Optional Unix timestamp
 	Input       string `json:"input" dynamodbav:"input"`
 	Output      string `json:"output" dynamodbav:"output"`
+	ExampleInput       string `json:"example_input" dynamodbav:"example_input"`
+	ExampleOutput      string `json:"example_output" dynamodbav:"example_output"`
 }

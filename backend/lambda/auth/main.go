@@ -14,9 +14,6 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	clientID := os.Getenv("GITHUB_CLIENT_ID")
 	redirectURI := fmt.Sprintf("https://%s/auth/github/callback", event.RequestContext.DomainName)
 
-	fmt.Printf("Redirect URI: %s\n", redirectURI)
-	fmt.Printf("Client ID: %s\n", clientID)
-
 	authURL := fmt.Sprintf(
 		"https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&scope=user",
 		clientID,

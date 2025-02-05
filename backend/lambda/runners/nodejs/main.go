@@ -45,12 +45,9 @@ type Problem struct {
 }
 
 func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	fmt.Printf("Received request: %+v\n", event)
-
 	// Parse request body
 	var req RunRequest
 	if err := json.Unmarshal([]byte(event.Body), &req); err != nil {
-		fmt.Printf("Error parsing request body: %v\n", err)
 		return events.APIGatewayProxyResponse{
 			StatusCode: 400,
 			Body:       fmt.Sprintf(`{"error": "Invalid request body: %v"}`, err),
@@ -60,7 +57,6 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	// Decode base64 binary data
 	binaryData, err := base64.StdEncoding.DecodeString(req.Binary)
 	if err != nil {
-		fmt.Printf("Error decoding binary data: %v\n", err)
 		return events.APIGatewayProxyResponse{
 			StatusCode: 400,
 			Body:       fmt.Sprintf(`{"error": "Invalid binary data: %v"}`, err),
@@ -70,51 +66,39 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	// Parse submission data
 	var submission Submission
 	if err := json.Unmarshal(binaryData, &submission); err != nil {
-		fmt.Printf("Error parsing submission data: %v\n", err)
 		return events.APIGatewayProxyResponse{
 			StatusCode: 400,
 			Body:       fmt.Sprintf(`{"error": "Invalid submission data: %v"}`, err),
 		}, nil
 	}
 
-	fmt.Printf("Parsed submission: ID=%s, ProblemID=%s, Code length=%d\n",
-		submission.ID, submission.ProblemID, len(submission.Code))
-
-	fmt.Printf("Submission code: %s\n", submission.Code)
-
 	// Create temp directory
 	tmpDir, err := os.MkdirTemp("", "nodejs-runner-*")
 	if err != nil {
-		fmt.Printf("Error creating temp directory: %v\n", err)
 		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
 			Body:       fmt.Sprintf(`{"error": "Failed to create temp directory: %v"}`, err),
 		}, nil
 	}
-	fmt.Printf("Created temp directory: %s\n", tmpDir)
 	defer os.RemoveAll(tmpDir)
 
 	// Write code to file
 	codePath := filepath.Join(tmpDir, "solution.js")
 	if err := os.WriteFile(codePath, []byte(submission.Code), 0644); err != nil {
-		fmt.Printf("Error writing code file: %v\n", err)
 		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
 			Body:       fmt.Sprintf(`{"error": "Failed to write code file: %v"}`, err),
 		}, nil
 	}
-	fmt.Printf("Wrote code to file: %s\n", codePath)
 
 	// Get problem from DynamoDB
 	problem, err := getProblem(ctx, submission.ProblemID)
 	if err != nil {
-		fmt.Printf("Error getting problem: %v\n", err)
 		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
 			Body:       fmt.Sprintf(`{"error": "Failed to get problem: %v"}`, err),
 		}, nil
 	}
-	fmt.Printf("Retrieved problem: %+v\n", problem)
 
 	// Run code
 	cmd := exec.Command("/opt/nodejs/bin/node", codePath)
@@ -122,16 +106,12 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	fmt.Println("Executing code...")
 	err = cmd.Run()
-	fmt.Printf("Execution complete. stdout: %s, stderr: %s\n", stdout.String(), stderr.String())
 
 	if err != nil {
-		fmt.Printf("Error executing code: %v\n", err)
 		// Update submission status
 		errOutput := stderr.String()
 		if err := db.UpdateSubmissionStatus(ctx, submission.ID, "error", &errOutput); err != nil {
-			fmt.Printf("Error updating submission status: %v\n", err)
 			return events.APIGatewayProxyResponse{
 				StatusCode: 500,
 				Body:       fmt.Sprintf(`{"error": "Failed to update submission: %v"}`, err),
@@ -149,24 +129,15 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	cleanOutput := strings.TrimSpace(output)
 	cleanExpected := strings.TrimSpace(problem.Output)
 
-	fmt.Printf("Code execution successful. Output: %s\n", output)
-
-	// Compare output with expected output
-	fmt.Printf("Clean Output: %q\n", cleanOutput)
-	fmt.Printf("Clean Expected: %q\n", cleanExpected)
 	if cleanOutput == cleanExpected {
-		fmt.Println("Output matches expected output")
 		if err := db.UpdateSubmissionStatus(ctx, submission.ID, "success", &output); err != nil {
-			fmt.Printf("Error updating submission status: %v\n", err)
 			return events.APIGatewayProxyResponse{
 				StatusCode: 500,
 				Body:       fmt.Sprintf(`{"error": "Failed to update submission: %v"}`, err),
 			}, nil
 		}
 	} else {
-		fmt.Printf("Output does not match expected output. Expected: %s, Got: %s\n", problem.Output, output)
 		if err := db.UpdateSubmissionStatus(ctx, submission.ID, "wrong_answer", &output); err != nil {
-			fmt.Printf("Error updating submission status: %v\n", err)
 			return events.APIGatewayProxyResponse{
 				StatusCode: 500,
 				Body:       fmt.Sprintf(`{"error": "Failed to update submission: %v"}`, err),
@@ -174,7 +145,6 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 		}
 	}
 
-	fmt.Println("Request handling complete")
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
 		Body:       fmt.Sprintf(`{"status": "completed", "output": %q}`, output),

@@ -1,15 +1,13 @@
-import type { Metadata } from "next"
+'use client'
+
 import { Inter } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
-import { AuthProvider } from "@/lib/auth"
+import { Provider } from 'react-redux'
+import { store } from '@/store'
+import CheckAuth from '@/components/check-auth'
 
 const inter = Inter({ subsets: ["latin"] })
-
-export const metadata: Metadata = {
-  title: "LearnCode - Practice Programming",
-  description: "Solve programming problems and improve your coding skills",
-}
 
 export default function RootLayout({
   children,
@@ -19,16 +17,18 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="dark"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <AuthProvider>
-            {children}
-          </AuthProvider>
-        </ThemeProvider>
+        <Provider store={store}>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="dark"
+            enableSystem
+            disableTransitionOnChange
+          >
+            <CheckAuth>
+              {children}
+            </CheckAuth>
+          </ThemeProvider>
+        </Provider>
       </body>
     </html>
   )

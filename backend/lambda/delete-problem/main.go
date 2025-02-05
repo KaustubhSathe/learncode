@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"learncode/backend/types"
 	"learncode/backend/utils"
@@ -28,34 +27,8 @@ func init() {
 	dynamoClient = dynamodb.NewFromConfig(cfg)
 }
 
-func getUserFromDynamoDB(ctx context.Context, githubID string) (*types.User, error) {
-	tableName := os.Getenv("USERS_TABLE")
-
-	result, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
-		TableName: aws.String(tableName),
-		Key: map[string]dbtypes.AttributeValue{
-			"id": &dbtypes.AttributeValueMemberS{Value: githubID},
-		},
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user from DynamoDB: %v", err)
-	}
-
-	if result.Item == nil {
-		return nil, nil
-	}
-
-	var user types.User
-	if err := attributevalue.UnmarshalMap(result.Item, &user); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal user: %v", err)
-	}
-
-	return &user, nil
-}
-
 func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	// Get token from Authorization header
+	// Check authorization
 	authHeader := event.Headers["Authorization"]
 	if authHeader == "" {
 		authHeader = event.Headers["authorization"]
@@ -78,7 +51,7 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	}
 	token := parts[1]
 
-	// Verify token with GitHub
+	// Verify token with GitHub and check admin status
 	githubUser, err := utils.GetGithubUser(token)
 	if err != nil {
 		return events.APIGatewayProxyResponse{
@@ -88,36 +61,62 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	}
 
 	// Get user's admin status from DynamoDB
-	dbUser, err := getUserFromDynamoDB(ctx, githubUser.ID)
+	result, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(os.Getenv("USERS_TABLE")),
+		Key: map[string]dbtypes.AttributeValue{
+			"id": &dbtypes.AttributeValueMemberS{Value: githubUser.ID},
+		},
+	})
+
 	if err != nil {
 		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
-			Body:       fmt.Sprintf(`{"error": "Failed to get user: %v"}`, err),
+			Body:       fmt.Sprintf(`{"error": "Failed to get user from database: %v"}`, err),
 		}, nil
 	}
 
-	// Set admin status from DB (false if user doesn't exist)
-	if dbUser != nil {
-		githubUser.IsAdmin = dbUser.IsAdmin
-	} else {
-		githubUser.IsAdmin = false
+	var dbUser types.User
+	if err := attributevalue.UnmarshalMap(result.Item, &dbUser); err != nil {
+		return events.APIGatewayProxyResponse{
+			StatusCode: 500,
+			Body:       fmt.Sprintf(`{"error": "Failed to parse user data: %v"}`, err),
+		}, nil
 	}
 
-	// Return user info
-	userJSON, err := json.Marshal(githubUser)
+	if !dbUser.IsAdmin {
+		return events.APIGatewayProxyResponse{
+			StatusCode: 403,
+			Body:       `{"error": "Unauthorized: Admin access required"}`,
+		}, nil
+	}
+
+	// Get problem ID from path parameters
+	problemID := event.PathParameters["id"]
+	if problemID == "" {
+		return events.APIGatewayProxyResponse{
+			StatusCode: 400,
+			Body:       `{"error": "Problem ID is required"}`,
+		}, nil
+	}
+
+	// Delete problem from DynamoDB
+	_, err = dynamoClient.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+		TableName: aws.String(os.Getenv("PROBLEMS_TABLE")),
+		Key: map[string]dbtypes.AttributeValue{
+			"id": &dbtypes.AttributeValueMemberS{Value: problemID},
+		},
+	})
+
 	if err != nil {
 		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
-			Body:       fmt.Sprintf(`{"error": "Failed to marshal user: %v"}`, err),
+			Body:       fmt.Sprintf(`{"error": "Failed to delete problem: %v"}`, err),
 		}, nil
 	}
 
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
-		Headers: map[string]string{
-			"Content-Type": "application/json",
-		},
-		Body: string(userJSON),
+		Body:       `{"message": "Problem deleted successfully"}`,
 	}, nil
 }
 

@@ -2,12 +2,14 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import Editor from "@monaco-editor/react"
-import { ChevronDown, ChevronUp, Play } from "lucide-react"
+import { Play } from "lucide-react"
 import { useRouter, usePathname } from 'next/navigation'
 import { Problem, User } from '@/types'
-import { useAuth } from '@/lib/auth'
 import { loader } from '@monaco-editor/react'
 import ReactMarkdown from 'react-markdown'
+import { setLoading } from "@/store/auth-slice"
+import { setUser } from "@/store/auth-slice"
+import { useAppSelector } from "@/store/hooks"
 
 // Configure Monaco Editor
 loader.config({
@@ -148,10 +150,9 @@ loader.init().then(monaco => {
   })
 })
 
-const defaultCode = "// Write your solution here\n"
-
 const languageOptions = [
   { value: 'javascript', label: 'JavaScript', defaultCode: '// Write your solution here\n' },
+
   { value: 'python', label: 'Python', defaultCode: '# Write your solution here\n' },
   { value: 'java', label: 'Java', defaultCode: 
 `public class Solution {
@@ -168,8 +169,7 @@ export default function ProblemPage() {
   const pathname = usePathname()
   const problemId = pathname.split('/').pop() // Get the last segment of the path
   const [problem, setProblem] = useState<Problem | null>(null)
-  const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { loading } = useAppSelector(state => state.auth) as { user: User | null, loading: boolean }
   const [error, setError] = useState<string | null>(null)
   const [code, setCode] = useState(languageOptions[0].defaultCode)
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(true)
@@ -214,7 +214,6 @@ export default function ProblemPage() {
         console.log('Problem data:', data)
         
         setProblem(data.problem)
-        setUser(data.user)
         setTestInput(data.problem.input)
         setExpectedOutput(data.problem.output)
       } catch (err) {
@@ -355,7 +354,7 @@ export default function ProblemPage() {
                     {option.label}
                   </option>
                 ))}
-              </select>
+            </select>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -366,26 +365,26 @@ export default function ProblemPage() {
                 <Play className="w-4 h-4" />
                 Run
               </button>
-              <button
-                onClick={handleSubmit}
+            <button
+              onClick={handleSubmit}
                 disabled={isSubmitting}
                 className="px-3 py-1 text-sm bg-green-600 hover:bg-green-700 text-white rounded disabled:opacity-50"
-              >
+            >
                 {isSubmitting ? 'Submitting...' : 'Submit'}
-              </button>
+            </button>
             </div>
           </div>
           
-          <Editor
+            <Editor
             language={language}
             value={code}
-            theme="vs-dark"
-            options={{
-              minimap: { enabled: false },
-              fontSize: 14,
+              theme="vs-dark"
+              options={{
+                minimap: { enabled: false },
+                fontSize: 14,
               lineNumbers: 'on',
               automaticLayout: true,
-              scrollBeyondLastLine: false,
+                scrollBeyondLastLine: false,
               tabSize: 2,
               wordWrap: 'on',
               scrollbar: {
@@ -475,7 +474,7 @@ export default function ProblemPage() {
                 ) : (
                   <p className="text-gray-500 dark:text-gray-400">Run your code to see the results</p>
                 )}
-              </div>
+            </div>
             )}
             {activeTab === 'submissions' && (
               <div>

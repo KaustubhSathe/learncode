@@ -119,9 +119,11 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 			"PROBLEMS_TABLE":     problemsTable.TableName(),
 			"SUBMISSIONS_TABLE":  submissionsTable.TableName(),
 			"MOMENTO_AUTH_TOKEN": jsii.String(os.Getenv("MOMENTO_AUTH_TOKEN")),
+			"USERS_TABLE":        usersTable.TableName(),
 		},
 	})
 
+	// Get Problems Lambda
 	getProblemsLambda := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("GetProblemsFunction"), &awscdklambdagoalpha.GoFunctionProps{
 		Runtime: awslambda.Runtime_PROVIDED_AL2(),
 		Entry:   jsii.String("lambda/get-problems"),
@@ -134,10 +136,55 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		},
 		Environment: &map[string]*string{
 			"PROBLEMS_TABLE": problemsTable.TableName(),
+			"USERS_TABLE":    usersTable.TableName(),
 		},
 	})
 
-	getProblemLambda := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("GetProblemFunction"), &awscdklambdagoalpha.GoFunctionProps{
+	problemsTable.GrantReadData(getProblemsLambda)
+	usersTable.GrantReadData(getProblemsLambda)
+
+	// Delete Problem Lambda
+	deleteProblemLambda := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("DeleteProblemLambda"), &awscdklambdagoalpha.GoFunctionProps{
+		Runtime: awslambda.Runtime_PROVIDED_AL2(),
+		Entry:   jsii.String("lambda/delete-problem"),
+		Role:    lambdaRole,
+		Bundling: &awscdklambdagoalpha.BundlingOptions{
+			Environment: &map[string]*string{
+				"GOOS":   jsii.String("linux"),
+				"GOARCH": jsii.String("amd64"),
+			},
+		},
+		Environment: &map[string]*string{
+			"PROBLEMS_TABLE": problemsTable.TableName(),
+			"USERS_TABLE":    usersTable.TableName(),
+		},
+	})
+
+	problemsTable.GrantWriteData(deleteProblemLambda)
+	usersTable.GrantReadData(deleteProblemLambda)
+
+	// Add Problem Lambda
+	addProblemLambda := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("AddProblemLambda"), &awscdklambdagoalpha.GoFunctionProps{
+		Runtime: awslambda.Runtime_PROVIDED_AL2(),
+		Entry:   jsii.String("lambda/add-problem"),
+		Role:    lambdaRole,
+		Bundling: &awscdklambdagoalpha.BundlingOptions{
+			Environment: &map[string]*string{
+				"GOOS":   jsii.String("linux"),
+				"GOARCH": jsii.String("amd64"),
+			},
+		},
+		Environment: &map[string]*string{
+			"PROBLEMS_TABLE": problemsTable.TableName(),
+			"USERS_TABLE":    usersTable.TableName(),
+		},
+	})
+
+	problemsTable.GrantWriteData(addProblemLambda)
+	usersTable.GrantReadData(addProblemLambda)
+
+	// Get Problem Lambda
+	getProblemLambda := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("GetProblemLambda"), &awscdklambdagoalpha.GoFunctionProps{
 		Runtime: awslambda.Runtime_PROVIDED_AL2(),
 		Entry:   jsii.String("lambda/get-problem"),
 		Role:    lambdaRole,
@@ -149,6 +196,7 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		},
 		Environment: &map[string]*string{
 			"PROBLEMS_TABLE": problemsTable.TableName(),
+			"USERS_TABLE":    usersTable.TableName(),
 		},
 	})
 
@@ -158,6 +206,7 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		Role:    lambdaRole,
 		Environment: &map[string]*string{
 			"GITHUB_CLIENT_ID": jsii.String(os.Getenv("GITHUB_CLIENT_ID")),
+			"USERS_TABLE":      usersTable.TableName(),
 		},
 	})
 
@@ -180,6 +229,7 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		Role:    lambdaRole,
 		Environment: &map[string]*string{
 			"GITHUB_CLIENT_ID": jsii.String(os.Getenv("GITHUB_CLIENT_ID")),
+			"USERS_TABLE":      usersTable.TableName(),
 		},
 	})
 
@@ -214,6 +264,7 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 			"PROBLEMS_TABLE":     problemsTable.TableName(),
 			"SUBMISSIONS_TABLE":  submissionsTable.TableName(),
 			"MOMENTO_AUTH_TOKEN": jsii.String(os.Getenv("MOMENTO_AUTH_TOKEN")),
+			"USERS_TABLE":        usersTable.TableName(),
 		},
 	})
 
@@ -234,6 +285,7 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 			"PROBLEMS_TABLE":     problemsTable.TableName(),
 			"SUBMISSIONS_TABLE":  submissionsTable.TableName(),
 			"MOMENTO_AUTH_TOKEN": jsii.String(os.Getenv("MOMENTO_AUTH_TOKEN")),
+			"USERS_TABLE":        usersTable.TableName(),
 		},
 	})
 
@@ -249,6 +301,7 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 			"PROBLEMS_TABLE":     problemsTable.TableName(),
 			"SUBMISSIONS_TABLE":  submissionsTable.TableName(),
 			"MOMENTO_AUTH_TOKEN": jsii.String(os.Getenv("MOMENTO_AUTH_TOKEN")),
+			"USERS_TABLE":        usersTable.TableName(),
 		},
 	})
 
@@ -330,7 +383,10 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 			AllowMethods: &[]awscdkapigatewayv2alpha.CorsHttpMethod{
 				awscdkapigatewayv2alpha.CorsHttpMethod_GET,
 				awscdkapigatewayv2alpha.CorsHttpMethod_POST,
+				awscdkapigatewayv2alpha.CorsHttpMethod_DELETE,
+				awscdkapigatewayv2alpha.CorsHttpMethod_PUT,
 				awscdkapigatewayv2alpha.CorsHttpMethod_OPTIONS,
+				awscdkapigatewayv2alpha.CorsHttpMethod_PATCH,
 			},
 			AllowOrigins: jsii.Strings("*"),
 		},
@@ -369,6 +425,30 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
 			jsii.String("GetProblemsIntegration"),
 			getProblemsLambda,
+			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
+		),
+	})
+
+	httpApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
+		Path: jsii.String("/admin/add"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
+			awscdkapigatewayv2alpha.HttpMethod_POST,
+		},
+		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
+			jsii.String("AddProblemIntegration"),
+			addProblemLambda,
+			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
+		),
+	})
+
+	httpApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
+		Path: jsii.String("/admin/problems/{id}"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
+			awscdkapigatewayv2alpha.HttpMethod_DELETE,
+		},
+		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
+			jsii.String("DeleteProblemIntegration"),
+			deleteProblemLambda,
 			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
 		),
 	})

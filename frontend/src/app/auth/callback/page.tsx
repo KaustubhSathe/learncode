@@ -2,7 +2,6 @@
 
 import { useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useAuth } from '@/lib/auth'
 
 export default function AuthCallback() {
   const router = useRouter()
@@ -17,7 +16,6 @@ export default function AuthCallback() {
         localStorage.setItem('auth_token', token)
         // Verify token was stored
         const storedToken = localStorage.getItem('auth_token')
-        
         // Trigger auth check to update context
         router.push('/problems')
       } catch (error) {

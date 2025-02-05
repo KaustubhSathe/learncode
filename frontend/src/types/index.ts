@@ -11,8 +11,11 @@ export interface Problem {
 }
 
 export interface User {
-  id: number
+  id: string
   login: string
+  isAdmin: boolean
+  created_at: number
+  last_login_at: number
 }
 
 export interface ProblemsResponse {

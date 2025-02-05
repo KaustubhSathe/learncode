@@ -4,8 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
+	"learncode/backend/utils"
 	"strings"
 
 	"learncode/backend/db"
@@ -13,46 +12,6 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 )
-
-type User struct {
-	ID    int    `json:"id"`
-	Login string `json:"login"`
-}
-
-func getGitHubUser(token string) (*User, error) {
-	fmt.Printf("Fetching GitHub user with token: %s...\n", token[:10])
-
-	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
-	if err != nil {
-		fmt.Printf("Error creating request: %v\n", err)
-		return nil, fmt.Errorf("failed to create request: %v", err)
-	}
-
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
-	req.Header.Add("Accept", "application/vnd.github.v3+json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Printf("Error making request: %v\n", err)
-		return nil, fmt.Errorf("failed to get user info: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		fmt.Printf("GitHub API error response: %s\n", string(body))
-		return nil, fmt.Errorf("GitHub API error: %s", string(body))
-	}
-
-	var user User
-	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
-		fmt.Printf("Error decoding response: %v\n", err)
-		return nil, fmt.Errorf("failed to parse user info: %v", err)
-	}
-
-	return &user, nil
-}
 
 func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	// Check authorization
@@ -78,8 +37,8 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	}
 	token := parts[1]
 
-	// Validate token with GitHub
-	user, err := getGitHubUser(token)
+	// Verify token with GitHub
+	_, err := utils.GetGithubUser(token)
 	if err != nil {
 		return events.APIGatewayProxyResponse{
 			StatusCode: 401,
@@ -108,7 +67,6 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	// Create response with both problem and user
 	response := map[string]interface{}{
 		"problem": problem,
-		"user":    user,
 	}
 
 	responseBody, err := json.Marshal(response)

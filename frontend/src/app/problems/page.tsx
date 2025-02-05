@@ -3,13 +3,10 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Problem } from '@/types'
-import Link from 'next/link'
-import { useAuth } from '@/lib/auth'
 
 export default function ProblemsPage() {
   const router = useRouter()
   const [problems, setProblems] = useState<Problem[]>([])
-  const { user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -32,7 +29,7 @@ export default function ProblemsPage() {
 
         if (!response.ok) {
           const errorText = await response.text()
-          throw new Error('Failed to fetch problems')
+          throw new Error('Failed to fetch problems', { cause: errorText })
         }
 
         const data = await response.json()

@@ -1,17 +1,22 @@
 "use client"
 
-import { AuthProvider, useAuth } from "@/lib/auth"
+import { useAppSelector } from "@/store/hooks"
 import Navbar from "@/components/navbar"
-import { useRouter } from "next/navigation"
-import { useEffect } from "react"
+import CheckAuth from "@/components/check-auth"
 
 export default function ProblemsLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  const { loading } = useAppSelector(state => state.auth)
+
+  if (loading) {
+    return <div>Loading...</div>
+  }
+
   return (
-    <AuthProvider>
+    <CheckAuth>
       <div className="h-screen bg-background flex flex-col">
         <Navbar />
         <main className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-2 
@@ -25,6 +30,6 @@ export default function ProblemsLayout({
           {children}
         </main>
       </div>
-    </AuthProvider>
+    </CheckAuth>
   )
 } 
