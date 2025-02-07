@@ -3,12 +3,23 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Problem } from '@/types'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import Link from 'next/link'
 
 export default function ProblemsPage() {
   const router = useRouter()
   const [problems, setProblems] = useState<Problem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedDifficulty, setSelectedDifficulty] = useState<string>('all')
 
   useEffect(() => {
     const fetchProblems = async () => {
@@ -45,37 +56,60 @@ export default function ProblemsPage() {
     fetchProblems()
   }, [router])
 
+  const filteredProblems = problems.filter(problem => 
+    selectedDifficulty === 'all' || problem.difficulty === selectedDifficulty
+  )
 
   if (loading) return <div>Loading...</div>
   if (error) return <div>Error: {error}</div>
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-6">Coding Problems</h1>
-      
-      <div className="grid gap-4">
-        {problems.map((problem) => (
-          <div 
-            key={problem.id} 
-            className="border rounded-lg p-4 hover:shadow-lg transition-shadow cursor-pointer dark:hover:shadow-primary/25 dark:border-gray-800"
-            onClick={() => {
-              router.push(`/problems/${problem.id}`)
-            }}
-          >
-            <div className="flex justify-between items-center">
-              <h3 className="text-xl font-semibold">{problem.title}</h3>
-              <span className={`px-3 py-1 rounded-full text-sm ${
-                problem.difficulty === 'Easy' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
-                problem.difficulty === 'Medium' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
-                'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-              }`}>
-                {problem.difficulty}
-              </span>
-            </div>
-            <p className="mt-2 text-gray-600 dark:text-gray-400">{problem.description}</p>
-          </div>
-        ))}
+    <div className="container mx-auto py-8 px-4">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold">Problems</h1>
+        <Select value={selectedDifficulty} onValueChange={setSelectedDifficulty}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Filter by difficulty" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Difficulties</SelectItem>
+            <SelectItem value="Easy">Easy</SelectItem>
+            <SelectItem value="Medium">Medium</SelectItem>
+            <SelectItem value="Hard">Hard</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
+      
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Title</TableHead>
+            <TableHead>Difficulty</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {filteredProblems.map((problem) => (
+            <TableRow 
+              key={problem.id}
+              className="cursor-pointer hover:bg-muted/50"
+              onClick={() => router.push(`/problems/${problem.id}`)}
+            >
+              <TableCell className="font-medium">
+                {problem.title}
+              </TableCell>
+              <TableCell>
+                <span className={
+                  problem.difficulty === 'Easy' ? 'text-green-500' :
+                  problem.difficulty === 'Medium' ? 'text-yellow-500' :
+                  'text-red-500'
+                }>
+                  {problem.difficulty}
+                </span>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
 
       {problems.length === 0 && (
         <div className="text-center text-gray-500 dark:text-gray-400 mt-8">

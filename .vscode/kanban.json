@@ -5,6 +5,14 @@
             "title": "To-Do",
             "tasks": [
                 {
+                    "text": "splitbucks completion",
+                    "id": "mexlrr5qg8vdpzc11pqq99ab"
+                },
+                {
+                    "text": "react native ludo game multiplayer",
+                    "id": "b39cwu1lxagh340iky1rq1ch"
+                },
+                {
                     "text": "ai code assisstant vscode extension/ app builder",
                     "id": "pirh7xyk2garsff02q7bm06e"
                 },
@@ -32,7 +40,7 @@
             "title": "Doing",
             "tasks": [
                 {
-                    "text": "## LearnCode\n\n- tests\n- ~~admin panel~~ \n- run button\n- submit button\n- submission history",
+                    "text": "## LearnCode\n\n- tests\n- ~~admin panel~~ \n- ~~run button~~\n- submit button\n- submission history",
                     "id": "yg9wuqph526g6em6lomhp1hz"
                 }
             ],
@@ -48,5 +56,5 @@
     ],
     "autosave": true,
     "saveToFile": true,
-    "timestamp": 1738784454992
+    "timestamp": 1738911460707
 }
