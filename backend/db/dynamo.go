@@ -119,3 +119,55 @@ func SaveUser(ctx context.Context, user *types.User) error {
 	})
 	return err
 }
+
+func GetSubmission(ctx context.Context, id string, userID string) (*types.Submission, error) {
+	result, err := client.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(os.Getenv("SUBMISSIONS_TABLE")),
+		Key: map[string]dbtypes.AttributeValue{
+			"id": &dbtypes.AttributeValueMemberS{Value: id},
+		},
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get submission: %v", err)
+	}
+
+	if result.Item == nil {
+		return nil, fmt.Errorf("submission not found")
+	}
+
+	var submission types.Submission
+	if err := attributevalue.UnmarshalMap(result.Item, &submission); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal submission: %v", err)
+	}
+
+	// Verify user owns this submission
+	if submission.UserID != userID {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	return &submission, nil
+}
+
+func GetUser(ctx context.Context, userID string) (*types.User, error) {
+	result, err := client.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(os.Getenv("USERS_TABLE")),
+		Key: map[string]dbtypes.AttributeValue{
+			"id": &dbtypes.AttributeValueMemberS{Value: userID},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user: %v", err)
+	}
+
+	if result.Item == nil {
+		return nil, nil // User not found, but not an error
+	}
+
+	var user types.User
+	if err := attributevalue.UnmarshalMap(result.Item, &user); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal user: %v", err)
+	}
+
+	return &user, nil
+}

@@ -490,6 +490,38 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		),
 	})
 
+	// Get Submission Lambda
+	getSubmissionLambda := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("GetSubmissionFunction"), &awscdklambdagoalpha.GoFunctionProps{
+		Runtime: awslambda.Runtime_PROVIDED_AL2(),
+		Entry:   jsii.String("lambda/get-submission"),
+		Role:    lambdaRole,
+		Bundling: &awscdklambdagoalpha.BundlingOptions{
+			Environment: &map[string]*string{
+				"GOOS":   jsii.String("linux"),
+				"GOARCH": jsii.String("amd64"),
+			},
+		},
+		Environment: &map[string]*string{
+			"SUBMISSIONS_TABLE": submissionsTable.TableName(),
+			"USERS_TABLE":       usersTable.TableName(),
+		},
+	})
+
+	submissionsTable.GrantReadData(getSubmissionLambda)
+	usersTable.GrantReadData(getSubmissionLambda)
+
+	httpApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
+		Path: jsii.String("/submissions/{id}"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
+			awscdkapigatewayv2alpha.HttpMethod_GET,
+		},
+		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
+			jsii.String("GetSubmissionIntegration"),
+			getSubmissionLambda,
+			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
+		),
+	})
+
 	// Output the API endpoints
 	awscdk.NewCfnOutput(stack, jsii.String("MainApiEndpoint"), &awscdk.CfnOutputProps{
 		Value:       httpApi.Url(),

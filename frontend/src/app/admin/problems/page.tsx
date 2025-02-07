@@ -66,7 +66,6 @@ export default function AdminProblemsPage() {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
         }
       })
-      console.log(response)
       if (!response.ok) {
         throw new Error('Failed to delete problem')
       }

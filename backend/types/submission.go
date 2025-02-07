@@ -10,4 +10,5 @@ type Submission struct {
 	CreatedAt   int64   `json:"created_at" dynamodbav:"created_at"`
 	UpdatedAt   int64   `json:"updated_at" dynamodbav:"updated_at"`
 	Result      *string `json:"result,omitempty" dynamodbav:"result,omitempty"`
+	Type        string  `json:"type" dynamodbav:"type"` // RUN, SUBMIT
 } 

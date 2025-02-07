@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import Editor from "@monaco-editor/react"
-import { Play } from "lucide-react"
+import { Play, Loader2 } from "lucide-react"
 import { useRouter, usePathname } from 'next/navigation'
-import { Problem, User } from '@/types'
+import { Problem, Submission, User } from '@/types'
 import { loader } from '@monaco-editor/react'
 import ReactMarkdown from 'react-markdown'
 import { setLoading } from "@/store/auth-slice"
@@ -184,12 +184,13 @@ export default function ProblemPage() {
   const verticalDragRef = useRef<HTMLDivElement>(null)
   const isDraggingRef = useRef<'horizontal' | 'vertical' | null>(null)
   const [activeTab, setActiveTab] = useState<Tab>('testcases')
+  const [isRunning, setIsRunning] = useState(false)
+  const [currentSubmission, setCurrentSubmission] = useState<Submission | null>(null)
 
   useEffect(() => {
     const fetchProblem = async () => {
       try {
         const token = localStorage.getItem('auth_token')
-        console.log('Problem page - Token:', token ? 'present' : 'missing')
         
         if (!token) {
           router.push('/')
@@ -202,16 +203,14 @@ export default function ProblemPage() {
             'Content-Type': 'application/json',
           },
         })
-        console.log('Response status:', response.status)
 
         if (!response.ok) {
           const errorText = await response.text()
-          console.log('Error response:', errorText)
           throw new Error('Failed to fetch problem')
         }
 
         const data = await response.json()
-        console.log('Problem data:', data)
+        console.log(data)
         
         setProblem(data.problem)
         setTestInput(data.problem.input)
@@ -238,7 +237,6 @@ export default function ProblemPage() {
     try {
       setIsSubmitting(true)
       const token = localStorage.getItem('auth_token')
-      console.log('Submit - Token:', token ? 'present' : 'missing')
       if (!token) {
         throw new Error('Not authenticated')
       }
@@ -248,7 +246,6 @@ export default function ProblemPage() {
         code,
         language,
       }
-      console.log('Submit - Request data:', submitData)
 
       // Submit to our backend API
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/submit`, {
@@ -259,7 +256,6 @@ export default function ProblemPage() {
         },
         body: JSON.stringify(submitData),
       })
-      console.log('Submit - Response status:', response.status)
 
       if (!response.ok) {
         const errorText = await response.text()
@@ -268,13 +264,11 @@ export default function ProblemPage() {
       }
 
       const submission = await response.json()
-      console.log('Submit - Submission created:', submission)
     } catch (error) {
       console.error('Submit - Caught error:', error)
       setOutput(error instanceof Error ? error.message : 'Failed to submit code')
     } finally {
       setIsSubmitting(false)
-      console.log('Submit - Completed')
     }
   }
 
@@ -306,6 +300,65 @@ export default function ProblemPage() {
     document.removeEventListener('mousemove', handleMouseMove)
     document.removeEventListener('mouseup', handleMouseUp)
   }, [handleMouseMove])
+
+  const pollSubmissionStatus = useCallback(async (submissionId: string) => {
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/submissions/${submissionId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+        }
+      }
+    )
+    if (!response.ok) throw new Error('Failed to fetch submission status')
+    return await response.json()
+  }, [])
+
+  const handleRun = async () => {
+    try {
+      setIsRunning(true)
+      setOutput(null)
+      setActiveTab('result')
+
+      // Submit code
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+        },
+        body: JSON.stringify({
+          problem_id: problemId,
+          language: language,
+          code: code,
+          type: 'RUN',
+        })
+      })
+      console.log(response)
+
+      if (!response.ok) throw new Error('Failed to submit code')
+      
+      const data = await response.json()
+      console.log(data)
+      setCurrentSubmission(data.submission)
+
+      // Poll for results
+      while (true) {
+        await new Promise(resolve => setTimeout(resolve, 1000)) // Wait 1 second between polls
+        const submission = await pollSubmissionStatus(data.submission.id)
+        setCurrentSubmission(submission)
+
+        if (submission.status === 'completed' || submission.status === 'error') {
+          setOutput(submission.result || 'No output')
+          setIsRunning(false)
+          break
+        }
+      }
+    } catch (error) {
+      setOutput(error instanceof Error ? error.message : 'An error occurred')
+      setIsRunning(false)
+    }
+  }
 
   return (
     <div className="flex h-full w-full">
@@ -358,12 +411,20 @@ export default function ProblemPage() {
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => {/* TODO: Add run handler */}}
-                disabled={isSubmitting}
-                className="px-3 py-1 text-sm bg-primary text-primary-foreground hover:bg-primary/90 rounded flex items-center gap-1 disabled:opacity-50"
+                onClick={handleRun}
+                disabled={isRunning}
+                className={`px-4 py-2 text-sm font-medium rounded-md 
+                  bg-primary text-primary-foreground hover:bg-primary/90
+                  disabled:opacity-50 flex items-center gap-2`}
               >
-                <Play className="w-4 h-4" />
-                Run
+                {isRunning ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Running...
+                  </>
+                ) : (
+                  'Run'
+                )}
               </button>
             <button
               onClick={handleSubmit}
@@ -463,8 +524,19 @@ export default function ProblemPage() {
           {/* Tab Content */}
           <div className="flex-1 overflow-y-auto p-4">
             {activeTab === 'testcases' && (
-              <div>
-                {/* Test cases content */}
+              <div className="space-y-4">
+                <div>
+                  <h3 className="font-medium mb-2">Example Input:</h3>
+                  <pre className="bg-gray-100 dark:bg-gray-800 p-3 rounded-md font-mono whitespace-pre-wrap">
+                    {problem?.example_input || 'No example input available'}
+                  </pre>
+                </div>
+                <div>
+                  <h3 className="font-medium mb-2">Example Output:</h3>
+                  <pre className="bg-gray-100 dark:bg-gray-800 p-3 rounded-md font-mono whitespace-pre-wrap">
+                    {problem?.example_output || 'No example output available'}
+                  </pre>
+                </div>
               </div>
             )}
             {activeTab === 'result' && (

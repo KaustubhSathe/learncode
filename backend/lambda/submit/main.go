@@ -4,73 +4,38 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"learncode/backend/db"
 	"learncode/backend/types"
-	"net/http"
-	"os"
+	"learncode/backend/utils"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/google/uuid"
-	"github.com/momentohq/client-sdk-go/auth"
-	"github.com/momentohq/client-sdk-go/config"
-	"github.com/momentohq/client-sdk-go/momento"
 )
 
 type SubmitRequest struct {
 	ProblemID string `json:"problem_id"`
 	Language  string `json:"language"`
 	Code      string `json:"code"`
-}
-
-func verifyGitHubToken(token string) (string, error) {
-	// Remove "Bearer " prefix if present
-	token = strings.TrimPrefix(token, "Bearer ")
-
-	// Make request to GitHub API to verify token
-	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %v", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to make request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("invalid token")
-	}
-
-	// Parse the response to get user ID
-	var user struct {
-		ID int64 `json:"id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
-		return "", fmt.Errorf("failed to parse response: %v", err)
-	}
-
-	return fmt.Sprintf("%d", user.ID), nil
+	Type      string `json:"type"`
 }
 
 func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	log.Printf("Received request: %+v", event)
+
 	// Parse request body
 	var req SubmitRequest
 	if err := json.Unmarshal([]byte(event.Body), &req); err != nil {
+		log.Printf("Failed to parse request body: %v", err)
 		return events.APIGatewayProxyResponse{
 			StatusCode: 400,
 			Body:       fmt.Sprintf(`{"error": "Invalid request body: %v"}`, err),
 		}, nil
 	}
+	log.Printf("Parsed request: %+v", req)
 
 	// Validate language
 	if !isValidLanguage(req.Language) {
@@ -85,6 +50,8 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	if authToken == "" {
 		authToken = event.Headers["authorization"]
 	}
+	log.Printf("Auth token: %v", authToken)
+	log.Printf("Auth token present: %v", authToken != "")
 
 	if authToken == "" {
 		return events.APIGatewayProxyResponse{
@@ -93,49 +60,74 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 		}, nil
 	}
 
+	// Clean token before verification
+	authToken = strings.TrimPrefix(authToken, "Bearer ")
+	log.Printf("Token after cleaning: %s...", authToken[:10])
+
 	// Verify token with GitHub
-	userID, err := verifyGitHubToken(authToken)
+	githubUser, err := utils.GetGithubUser(authToken)
 	if err != nil {
+		log.Printf("Failed to verify GitHub token: %v", err)
 		return events.APIGatewayProxyResponse{
 			StatusCode: 401,
-			Body:       fmt.Sprintf(`{"error": "Invalid token: %v"}`, err),
+			Body:       fmt.Sprintf(`{"error": "Failed to verify token: %v"}`, err),
 		}, nil
 	}
+	log.Printf("GitHub user verified: %s", githubUser.ID)
 
 	// Create submission record
 	submission := types.Submission{
 		ID:        uuid.New().String(),
-		UserID:    userID,
+		UserID:    githubUser.ID,
 		ProblemID: req.ProblemID,
 		Language:  req.Language,
 		Code:      req.Code,
 		Status:    "pending",
 		CreatedAt: time.Now().Unix(),
 		UpdatedAt: time.Now().Unix(),
+		Type:      req.Type,
 	}
+	log.Printf("Created submission record: %+v", submission)
 
 	// Save to DynamoDB
-	if err := saveSubmission(ctx, &submission); err != nil {
+	if err := db.SaveSubmission(ctx, &submission); err != nil {
+		log.Printf("Failed to save submission: %v", err)
 		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
 			Body:       fmt.Sprintf(`{"error": "Failed to save submission: %v"}`, err),
 		}, nil
 	}
+	log.Printf("Saved submission to DynamoDB")
 
-	// Publish to Momento topic
-	if err := publishToMomento(ctx, submission); err != nil {
+	// Publish to Momento topic for processing
+	if err := utils.PublishToMomento(ctx, submission); err != nil {
+		log.Printf("Failed to publish to Momento: %v", err)
 		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
-			Body:       fmt.Sprintf(`{"error": "Failed to publish to Momento: %v"}`, err),
+			Body:       fmt.Sprintf(`{"error": "Failed to publish submission: %v"}`, err),
+		}, nil
+	}
+	log.Printf("Published to Momento successfully")
+
+	// Return the submission ID
+	responseBody, err := json.Marshal(map[string]interface{}{
+		"submission": submission,
+	})
+	if err != nil {
+		log.Printf("Failed to marshal response: %v", err)
+		return events.APIGatewayProxyResponse{
+			StatusCode: 500,
+			Body:       fmt.Sprintf(`{"error": "Failed to create response: %v"}`, err),
 		}, nil
 	}
 
+	log.Printf("Returning successful response")
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
 		Headers: map[string]string{
 			"Content-Type": "application/json",
 		},
-		Body: fmt.Sprintf(`{"submission_id": "%s", "status": "pending"}`, submission.ID),
+		Body: string(responseBody),
 	}, nil
 }
 
@@ -147,53 +139,6 @@ func isValidLanguage(lang string) bool {
 		"python": true,
 	}
 	return validLanguages[lang]
-}
-
-func saveSubmission(ctx context.Context, submission *types.Submission) error {
-	cfg, err := awsconfig.LoadDefaultConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("unable to load SDK config: %v", err)
-	}
-
-	client := dynamodb.NewFromConfig(cfg)
-	item, err := attributevalue.MarshalMap(submission)
-	if err != nil {
-		return fmt.Errorf("failed to marshal submission: %v", err)
-	}
-
-	_, err = client.PutItem(ctx, &dynamodb.PutItemInput{
-		TableName: aws.String(os.Getenv("SUBMISSIONS_TABLE")),
-		Item:      item,
-	})
-	return err
-}
-
-func publishToMomento(ctx context.Context, submission types.Submission) error {
-	credentialProvider, err := auth.NewEnvMomentoTokenProvider("MOMENTO_AUTH_TOKEN")
-	if err != nil {
-		return fmt.Errorf("failed to load Momento auth token: %v", err)
-	}
-
-	client, err := momento.NewTopicClient(config.TopicsDefault(), credentialProvider)
-	if err != nil {
-		return fmt.Errorf("failed to create Momento client: %v", err)
-	}
-	defer client.Close()
-
-	// Create topic name based on language
-	topicName := fmt.Sprintf("learncode-%s", submission.Language)
-
-	// Publish submission to appropriate topic
-	message, _ := json.Marshal(submission)
-	if _, err := client.Publish(ctx, &momento.TopicPublishRequest{
-		CacheName: "learncode-cache",
-		TopicName: topicName,
-		Value:     momento.Bytes(message),
-	}); err != nil {
-		return fmt.Errorf("failed to publish to topic %s: %v", topicName, err)
-	}
-
-	return nil
 }
 
 func main() {

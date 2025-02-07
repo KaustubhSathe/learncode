@@ -8,7 +8,10 @@ export interface Problem {
   deleted_at?: number // Optional Unix timestamp
   input: string
   output: string
+  example_input: string
+  example_output: string
 }
+
 
 export interface User {
   id: string
@@ -22,3 +25,10 @@ export interface ProblemsResponse {
   problems: Problem[]
   user: User
 } 
+
+export interface Submission {
+  id: string
+  status: 'pending' | 'running' | 'completed' | 'error'
+  result?: string
+  type: 'submit' | 'run'
+}

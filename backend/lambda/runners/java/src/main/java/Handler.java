@@ -30,6 +30,7 @@ public class Handler implements RequestHandler<APIGatewayProxyRequestEvent, APIG
         context.getLogger().log("Request path: " + event.getPath());
         context.getLogger().log("Request method: " + event.getHttpMethod());
         
+        Submission submission = null;
         try {
             // Parse the request
             context.getLogger().log("Parsing request body");
@@ -49,7 +50,7 @@ public class Handler implements RequestHandler<APIGatewayProxyRequestEvent, APIG
             context.getLogger().log("Decoded submission: " + submissionJson);
             
             // Parse the submission
-            Submission submission = gson.fromJson(submissionJson, Submission.class);
+            submission = gson.fromJson(submissionJson, Submission.class);
             context.getLogger().log("Submission details - ID: " + submission.id + 
                 ", Problem ID: " + submission.problem_id + 
                 ", User ID: " + submission.user_id +
@@ -58,7 +59,7 @@ public class Handler implements RequestHandler<APIGatewayProxyRequestEvent, APIG
             
             // Update submission status to running
             context.getLogger().log("Updating submission status to running");
-            updateSubmissionStatus(submission.id, "running", null, context);
+            updateSubmissionStatus(submission.id, "running", null, context, submission);
             
             // Execute the Java code
             context.getLogger().log("Executing Java code");
@@ -67,7 +68,7 @@ public class Handler implements RequestHandler<APIGatewayProxyRequestEvent, APIG
             
             // Update final status
             context.getLogger().log("Updating submission status to completed");
-            updateSubmissionStatus(submission.id, "completed", result, context);
+            updateSubmissionStatus(submission.id, "completed", result, context, submission);
             
             context.getLogger().log("Request completed successfully");
             return new APIGatewayProxyResponseEvent()
@@ -78,13 +79,23 @@ public class Handler implements RequestHandler<APIGatewayProxyRequestEvent, APIG
             context.getLogger().log("Request failed with error: " + e.getClass().getName());
             context.getLogger().log("Error: " + e.getMessage() + "\n" + Arrays.toString(e.getStackTrace()));
             String errorMessage = e.getMessage() != null ? e.getMessage() : "Unknown error occurred";
+            
+            // Update submission status to error
+            try {
+                context.getLogger().log("Updating submission status to error");
+                submission.result = errorMessage;
+                updateSubmissionStatus(submission.id, "error", null, context, submission);
+            } catch (Exception updateErr) {
+                context.getLogger().log("Failed to update error status: " + updateErr.getMessage());
+            }
+            
             return new APIGatewayProxyResponseEvent()
                 .withStatusCode(500)
                 .withBody(gson.toJson(Map.of("error", errorMessage)));
         }
     }
     
-    private void updateSubmissionStatus(String id, String status, String result, Context context) {
+    private void updateSubmissionStatus(String id, String status, String result, Context context, Submission submission) {
         context.getLogger().log("Updating submission status - ID: " + id + ", Status: " + status);
         Map<String, AttributeValue> key = new HashMap<>();
         key.put("id", AttributeValue.builder().s(id).build());
@@ -99,7 +110,15 @@ public class Handler implements RequestHandler<APIGatewayProxyRequestEvent, APIG
             .updateExpression("SET #status = :s")
             .expressionAttributeNames(Map.of("#status", "status"));
             
-        if (result != null) {
+        if (status.equals("error")) {
+            context.getLogger().log("Including error message in update");
+            values.put(":e", AttributeValue.builder().s(submission.result).build());
+            updateBuilder.updateExpression("SET #status = :s, #result = :e")
+                .expressionAttributeNames(Map.of(
+                    "#status", "status",
+                    "#result", "result"
+                ));
+        } else if (result != null) {
             context.getLogger().log("Including result in update, length: " + result.length());
             values.put(":r", AttributeValue.builder().s(result).build());
             updateBuilder.updateExpression("SET #status = :s, #result = :r")
@@ -262,6 +281,7 @@ class Submission {
     public String language;
     public String code;
     public String status;
+    public String result;
     public long created_at;
     public long updated_at;
 } 
