@@ -7,7 +7,6 @@ import (
 	"learncode/backend/db"
 	"learncode/backend/types"
 	"learncode/backend/utils"
-	"log"
 	"strings"
 	"time"
 
@@ -46,7 +45,7 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	if authToken == "" {
 		authToken = event.Headers["authorization"]
 	}
-	
+
 	if authToken == "" {
 		return events.APIGatewayProxyResponse{
 			StatusCode: 401,
@@ -56,7 +55,7 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 
 	// Clean token before verification
 	authToken = strings.TrimPrefix(authToken, "Bearer ")
-	
+
 	// Verify token with GitHub
 	githubUser, err := utils.GetGithubUser(authToken)
 	if err != nil {
@@ -65,7 +64,7 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 			Body:       fmt.Sprintf(`{"error": "Failed to verify token: %v"}`, err),
 		}, nil
 	}
-	
+
 	// Create submission record
 	submission := types.Submission{
 		ID:        uuid.New().String(),
@@ -78,7 +77,7 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 		UpdatedAt: time.Now().Unix(),
 		Type:      req.Type,
 	}
-	
+
 	// Save to DynamoDB
 	if err := db.SaveSubmission(ctx, &submission); err != nil {
 		return events.APIGatewayProxyResponse{
@@ -86,7 +85,7 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 			Body:       fmt.Sprintf(`{"error": "Failed to save submission: %v"}`, err),
 		}, nil
 	}
-	
+
 	// Publish to Momento topic for processing
 	if err := utils.PublishToMomento(ctx, submission); err != nil {
 		return events.APIGatewayProxyResponse{
@@ -94,7 +93,7 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 			Body:       fmt.Sprintf(`{"error": "Failed to publish submission: %v"}`, err),
 		}, nil
 	}
-	
+
 	// Return the submission ID
 	responseBody, err := json.Marshal(map[string]interface{}{
 		"submission": submission,
