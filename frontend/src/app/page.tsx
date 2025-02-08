@@ -16,7 +16,7 @@ export default function Home() {
   }, [router])
 
   const handleGitHubLogin = () => {
-    window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/auth/github`
+    window.location.href = `${process.env.API_URL}/auth/github`
   }
 
   return (

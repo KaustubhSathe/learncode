@@ -35,7 +35,7 @@ export default function AdminProblemsPage() {
 
   const fetchProblems = async () => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/problems`, {
+      const response = await fetch(`${process.env.API_URL}/problems`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
         }
@@ -60,7 +60,7 @@ export default function AdminProblemsPage() {
     }
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/problems/${id}`, {
+      const response = await fetch(`${process.env.API_URL}/admin/problems/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`

@@ -213,7 +213,7 @@ export default function ProblemPage() {
           return
         }
 
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/problems/${problemId}`, {
+        const response = await fetch(`${process.env.API_URL}/problems/${problemId}`, {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -257,7 +257,7 @@ export default function ProblemPage() {
     
     try {
       setIsSubmitting(true)
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/submit`, {
+      const response = await fetch(`${process.env.API_URL}/submit`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -319,7 +319,7 @@ export default function ProblemPage() {
 
   const pollSubmissionStatus = useCallback(async (problemId: string, submissionId: string) => {
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/submissions?problem_id=${problemId}&submission_id=${submissionId}&type=RUN`,
+      `${process.env.API_URL}/submissions?problem_id=${problemId}&submission_id=${submissionId}&type=RUN`,
       {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
@@ -341,7 +341,7 @@ export default function ProblemPage() {
       setActiveTab('result')
 
       // Submit code
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/submit`, {
+      const response = await fetch(`${process.env.API_URL}/submit`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -387,7 +387,7 @@ export default function ProblemPage() {
   const fetchSubmissions = async () => {
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/submissions?problem_id=${problemId}&type=SUBMIT`,
+        `${process.env.API_URL}/submissions?problem_id=${problemId}&type=SUBMIT`,
         {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('auth_token')}`

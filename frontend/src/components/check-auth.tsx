@@ -24,7 +24,7 @@ export default function CheckAuth({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/verify`, {
+        const response = await fetch(`${process.env.API_URL}/auth/verify`, {
           headers: {
             authorization: `Bearer ${token}`,
           },

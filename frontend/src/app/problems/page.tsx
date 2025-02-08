@@ -31,7 +31,7 @@ export default function ProblemsPage() {
           return
         }
 
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/problems`, {
+        const response = await fetch(`${process.env.API_URL}/problems`, {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',

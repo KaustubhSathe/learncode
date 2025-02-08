@@ -36,7 +36,7 @@
             "title": "Doing",
             "tasks": [
                 {
-                    "text": "## LearnCode\n\n- tests\n- ~~admin panel~~ \n- ~~run button~~\n- submit button\n- submission history",
+                    "text": "## LearnCode\n\n- tests\n- ~~admin panel~~ \n- ~~run button~~\n- ~~submit button~~\n- ~~submission history~~",
                     "id": "yg9wuqph526g6em6lomhp1hz"
                 },
                 {
@@ -56,5 +56,5 @@
     ],
     "autosave": true,
     "saveToFile": true,
-    "timestamp": 1738929825322
+    "timestamp": 1739015719918
 }

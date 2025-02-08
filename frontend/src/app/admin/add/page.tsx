@@ -61,7 +61,7 @@ export default function AdminPage() {
     const authToken = localStorage.getItem('auth_token')
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/add`, {
+      const response = await fetch(`${process.env.API_URL}/admin/add`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
