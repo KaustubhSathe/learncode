@@ -25,7 +25,7 @@ func init() {
 	client = dynamodb.NewFromConfig(cfg)
 }
 
-func UpdateSubmissionStatus(ctx context.Context, id string, status string, result *string) error {
+func UpdateSubmissionStatus(ctx context.Context, problemId string, submissionId string, status string, result *string) error {
 	updateExpression := "SET #status = :status, #updated_at = :updated_at"
 	expressionAttributeNames := map[string]string{
 		"#status":     "status",
@@ -45,7 +45,8 @@ func UpdateSubmissionStatus(ctx context.Context, id string, status string, resul
 	_, err := client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: aws.String(os.Getenv("SUBMISSIONS_TABLE")),
 		Key: map[string]dbtypes.AttributeValue{
-			"id": &dbtypes.AttributeValueMemberS{Value: id},
+			"problem_id":    &dbtypes.AttributeValueMemberS{Value: problemId},
+			"submission_id": &dbtypes.AttributeValueMemberS{Value: submissionId},
 		},
 		UpdateExpression:          &updateExpression,
 		ExpressionAttributeNames:  expressionAttributeNames,
@@ -120,35 +121,6 @@ func SaveUser(ctx context.Context, user *types.User) error {
 	return err
 }
 
-func GetSubmission(ctx context.Context, id string, userID string) (*types.Submission, error) {
-	result, err := client.GetItem(ctx, &dynamodb.GetItemInput{
-		TableName: aws.String(os.Getenv("SUBMISSIONS_TABLE")),
-		Key: map[string]dbtypes.AttributeValue{
-			"id": &dbtypes.AttributeValueMemberS{Value: id},
-		},
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get submission: %v", err)
-	}
-
-	if result.Item == nil {
-		return nil, fmt.Errorf("submission not found")
-	}
-
-	var submission types.Submission
-	if err := attributevalue.UnmarshalMap(result.Item, &submission); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal submission: %v", err)
-	}
-
-	// Verify user owns this submission
-	if submission.UserID != userID {
-		return nil, fmt.Errorf("unauthorized")
-	}
-
-	return &submission, nil
-}
-
 func GetUser(ctx context.Context, userID string) (*types.User, error) {
 	result, err := client.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(os.Getenv("USERS_TABLE")),
@@ -170,4 +142,54 @@ func GetUser(ctx context.Context, userID string) (*types.User, error) {
 	}
 
 	return &user, nil
+}
+
+func GetSubmissionsByProblemAndType(ctx context.Context, submissionID string, problemID string, submissionType string, userId string) ([]types.Submission, error) {
+	// Initialize DynamoDB client
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		fmt.Printf("Failed to load AWS config: %v\n", err)
+		return nil, fmt.Errorf("failed to load AWS config: %v", err)
+	}
+
+	client := dynamodb.NewFromConfig(cfg)
+
+	// Query submissions using begins_with and filter by type
+	input := &dynamodb.QueryInput{
+		TableName:              aws.String("SubmissionsV2"),
+		KeyConditionExpression: aws.String("problem_id = :problem_id AND begins_with(submission_id, :prefix)"),
+		ExpressionAttributeValues: map[string]dbtypes.AttributeValue{
+			":problem_id": &dbtypes.AttributeValueMemberS{Value: problemID},
+			":prefix":     &dbtypes.AttributeValueMemberS{Value: submissionID},
+			":type":       &dbtypes.AttributeValueMemberS{Value: submissionType},
+			":userId":     &dbtypes.AttributeValueMemberS{Value: userId},
+		},
+		FilterExpression: aws.String("#t = :type AND user_id = :userId"),
+		ExpressionAttributeNames: map[string]string{
+			"#t": "type",
+		},
+	}
+
+	fmt.Printf("Executing DynamoDB query with input: %+v\n", input)
+	result, err := client.Query(ctx, input)
+	if err != nil {
+		fmt.Printf("DynamoDB query failed: %v\n", err)
+		return nil, fmt.Errorf("failed to query submissions: %v", err)
+	}
+
+	fmt.Printf("Query returned %d items\n", len(result.Items))
+
+	// Convert DynamoDB items to Submission structs
+	var submissions []types.Submission
+	for _, item := range result.Items {
+		var submission types.Submission
+		if err := attributevalue.UnmarshalMap(item, &submission); err != nil {
+			fmt.Printf("Failed to unmarshal item: %v\n", err)
+			return nil, fmt.Errorf("failed to unmarshal submission: %v", err)
+		}
+		submissions = append(submissions, submission)
+	}
+
+	fmt.Printf("Successfully processed %d submissions\n", len(submissions))
+	return submissions, nil
 }

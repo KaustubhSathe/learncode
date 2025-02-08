@@ -10,6 +10,8 @@ import ReactMarkdown from 'react-markdown'
 import { setLoading } from "@/store/auth-slice"
 import { setUser } from "@/store/auth-slice"
 import { useAppSelector } from "@/store/hooks"
+import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 // Configure Monaco Editor
 loader.config({
@@ -150,34 +152,45 @@ loader.init().then(monaco => {
   })
 })
 
-const languageOptions = [
-  { value: 'javascript', label: 'JavaScript', defaultCode: '// Write your solution here\n' },
-
-  { value: 'python', label: 'Python', defaultCode: '# Write your solution here\n' },
-  { value: 'java', label: 'Java', defaultCode: 
-`public class Solution {
-    public static void main(String[] args) {
-        // Write your solution here
-    }
-}`}
-]
-
 type Tab = 'testcases' | 'result' | 'submissions'
+
+const SUPPORTED_LANGUAGES = [
+  { 
+    id: 'javascript', 
+    name: 'JavaScript',
+    defaultCode: '// Write your solution here\n'
+  },
+  { 
+    id: 'python', 
+    name: 'Python',
+    defaultCode: '# Write your solution here\n'
+  },
+  { 
+    id: 'java', 
+    name: 'Java',
+    defaultCode: `public class Solution {
+      public static void main(String[] args) {
+          // Write your solution here
+      }
+  }`
+  },
+] as const
+
+type Language = typeof SUPPORTED_LANGUAGES[number]['id']
 
 export default function ProblemPage() {
   const router = useRouter()
   const pathname = usePathname()
-  const problemId = pathname.split('/').pop() // Get the last segment of the path
+  const problemId = pathname.split('/').pop()
   const [problem, setProblem] = useState<Problem | null>(null)
   const { loading } = useAppSelector(state => state.auth) as { user: User | null, loading: boolean }
   const [error, setError] = useState<string | null>(null)
-  const [code, setCode] = useState(languageOptions[0].defaultCode)
+  const [code, setCode] = useState('')
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(true)
   const [output, setOutput] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [testInput, setTestInput] = useState("")
   const [expectedOutput, setExpectedOutput] = useState("")
-  const [language, setLanguage] = useState(languageOptions[0].value)
   const [leftWidth, setLeftWidth] = useState(40) // percentage
   const [bottomHeight, setBottomHeight] = useState(30) // percentage
   const horizontalDragRef = useRef<HTMLDivElement>(null)
@@ -186,6 +199,9 @@ export default function ProblemPage() {
   const [activeTab, setActiveTab] = useState<Tab>('testcases')
   const [isRunning, setIsRunning] = useState(false)
   const [currentSubmission, setCurrentSubmission] = useState<Submission | null>(null)
+  const [submissions, setSubmissions] = useState<Submission[]>([])
+  const [selectedLanguage, setSelectedLanguage] = useState<Language>('javascript')
+  const [isPolling, setIsPolling] = useState(false)
 
   useEffect(() => {
     const fetchProblem = async () => {
@@ -215,6 +231,9 @@ export default function ProblemPage() {
         setProblem(data.problem)
         setTestInput(data.problem.input)
         setExpectedOutput(data.problem.output)
+        
+        // Fetch submissions after problem is loaded
+        fetchSubmissions()
       } catch (err) {
         console.error('Fetch error:', err)
         setError(err instanceof Error ? err.message : 'An error occurred')
@@ -227,46 +246,43 @@ export default function ProblemPage() {
   }, [problemId, router])
 
   useEffect(() => {
-    const selectedLang = languageOptions.find(l => l.value === language)
+    const selectedLang = SUPPORTED_LANGUAGES.find(l => l.id === selectedLanguage)
     if (selectedLang) {
       setCode(selectedLang.defaultCode)
     }
-  }, [language])
+  }, [selectedLanguage])
 
   const handleSubmit = async () => {
+    if (!code) return
+    
     try {
       setIsSubmitting(true)
-      const token = localStorage.getItem('auth_token')
-      if (!token) {
-        throw new Error('Not authenticated')
-      }
-
-      const submitData = {
-        problem_id: problemId,
-        code,
-        language,
-      }
-
-      // Submit to our backend API
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/submit`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
         },
-        body: JSON.stringify(submitData),
+        body: JSON.stringify({
+          problem_id: problemId,
+          language: selectedLanguage,
+          code: code,
+          type: 'SUBMIT'
+        })
       })
+      console.log(response)
 
       if (!response.ok) {
-        const errorText = await response.text()
-        console.error('Submit - Error response:', errorText)
-        throw new Error('Failed to submit code')
+        const error = await response.json()
+        console.log(error)
+        throw new Error(error.error || 'Failed to submit code')
       }
 
-      const submission = await response.json()
-    } catch (error) {
-      console.error('Submit - Caught error:', error)
-      setOutput(error instanceof Error ? error.message : 'Failed to submit code')
+      const data = await response.json()
+      setActiveTab('submissions')
+      await fetchSubmissions() // We'll implement this next
+    } catch (err) {
+      setOutput(err instanceof Error ? err.message : 'Failed to submit code')
     } finally {
       setIsSubmitting(false)
     }
@@ -301,16 +317,20 @@ export default function ProblemPage() {
     document.removeEventListener('mouseup', handleMouseUp)
   }, [handleMouseMove])
 
-  const pollSubmissionStatus = useCallback(async (submissionId: string) => {
+  const pollSubmissionStatus = useCallback(async (problemId: string, submissionId: string) => {
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/submissions/${submissionId}`,
+      `${process.env.NEXT_PUBLIC_API_URL}/submissions?problem_id=${problemId}&submission_id=${submissionId}&type=RUN`,
       {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
         }
       }
     )
-    if (!response.ok) throw new Error('Failed to fetch submission status')
+    if (!response.ok) {
+      const msg = await response.json()
+      console.log(msg)
+      throw new Error('Failed to fetch submission status')
+    }
     return await response.json()
   }, [])
 
@@ -329,23 +349,27 @@ export default function ProblemPage() {
         },
         body: JSON.stringify({
           problem_id: problemId,
-          language: language,
+          language: selectedLanguage,
           code: code,
           type: 'RUN',
         })
       })
-      console.log(response)
 
-      if (!response.ok) throw new Error('Failed to submit code')
+      if (!response.ok) {
+        const msg = await response.json()
+        console.log(msg)
+        throw new Error('Failed to submit code')
+      }
       
       const data = await response.json()
-      console.log(data)
       setCurrentSubmission(data.submission)
+
 
       // Poll for results
       while (true) {
         await new Promise(resolve => setTimeout(resolve, 1000)) // Wait 1 second between polls
-        const submission = await pollSubmissionStatus(data.submission.id)
+        const submission = (await pollSubmissionStatus(data.submission.problem_id, data.submission.submission_id)).submissions[0]
+        console.log(submission)
         setCurrentSubmission(submission)
 
         if (submission.status === 'completed' || submission.status === 'error') {
@@ -359,6 +383,55 @@ export default function ProblemPage() {
       setIsRunning(false)
     }
   }
+
+  const fetchSubmissions = async () => {
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/submissions?problem_id=${problemId}&type=SUBMIT`,
+        {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+          }
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch submissions')
+      }
+
+      const data = await response.json()
+      setSubmissions(data?.submissions ? data.submissions : [])
+      
+      // Check if we need to continue polling
+      const hasInProgressSubmission = data?.submissions?.some(
+        (sub: Submission) => sub.status === 'pending' || sub.status === 'running'
+      )
+      setIsPolling(hasInProgressSubmission)
+    } catch (err) {
+      console.error('Failed to fetch submissions:', err)
+      setIsPolling(false)
+    }
+  }
+
+  useEffect(() => {
+    let pollInterval: NodeJS.Timeout | null = null;
+    
+    if (isPolling && activeTab === 'submissions') {
+      pollInterval = setInterval(fetchSubmissions, 2000) // Poll every 2 seconds
+    }
+
+    return () => {
+      if (pollInterval) {
+        clearInterval(pollInterval)
+      }
+    }
+  }, [isPolling, activeTab])
+
+  useEffect(() => {
+    if (activeTab === 'submissions') {
+      fetchSubmissions()
+    }
+  }, [activeTab, problemId])
 
   return (
     <div className="flex h-full w-full">
@@ -397,17 +470,18 @@ export default function ProblemPage() {
         <div style={{ height: `calc(100% - ${bottomHeight}%)` }} className="w-full flex flex-col relative">
           <div className="bg-gray-100 dark:bg-gray-800 p-2 border-b dark:border-gray-700 flex items-center justify-between">
             <div>
-              <select
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-                className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 rounded px-2 py-1 text-sm border dark:border-gray-700"
-              >
-                {languageOptions.map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-            </select>
+              <Select value={selectedLanguage} onValueChange={(value) => setSelectedLanguage(value as Language)}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Select Language" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SUPPORTED_LANGUAGES.map(lang => (
+                    <SelectItem key={lang.id} value={lang.id}>
+                      {lang.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -415,7 +489,7 @@ export default function ProblemPage() {
                 disabled={isRunning}
                 className={`px-4 py-2 text-sm font-medium rounded-md 
                   bg-primary text-primary-foreground hover:bg-primary/90
-                  disabled:opacity-50 flex items-center gap-2`}
+                  disabled:opacity-50 flex items-center gap-2 h-8`}
               >
                 {isRunning ? (
                   <>
@@ -429,7 +503,7 @@ export default function ProblemPage() {
             <button
               onClick={handleSubmit}
                 disabled={isSubmitting}
-                className="px-3 py-1 text-sm bg-green-600 hover:bg-green-700 text-white rounded disabled:opacity-50"
+                className="px-3 py-1 h-8 text-sm bg-green-600 hover:bg-green-700 text-white rounded disabled:opacity-50"
             >
                 {isSubmitting ? 'Submitting...' : 'Submit'}
             </button>
@@ -437,7 +511,7 @@ export default function ProblemPage() {
           </div>
           
             <Editor
-            language={language}
+            language={selectedLanguage}
             value={code}
               theme="vs-dark"
               options={{
@@ -549,9 +623,52 @@ export default function ProblemPage() {
             </div>
             )}
             {activeTab === 'submissions' && (
-              <div>
-                {/* Submissions history will go here */}
-                <p className="text-gray-500 dark:text-gray-400">Your submission history will appear here</p>
+              <div className="space-y-4">
+                {submissions?.length === 0 ? (
+                  <p className="text-gray-500 dark:text-gray-400">No submissions yet</p>
+                ) : (
+                  <div className="space-y-4">
+                    {submissions?.map((submission) => (
+                      <div 
+                        key={submission.submission_id} 
+                        className="p-4 border rounded-lg dark:border-gray-700"
+                      >
+                        <div className="text-sm text-gray-500 mb-2">
+                          Submission ID: {submission.submission_id}
+                        </div>
+                        <div className="flex justify-between items-center mb-2">
+                          <div className="flex items-center gap-4">
+                            <span className={
+                              submission.status === 'completed' ? 'text-green-500' :
+                              submission.status === 'error' ? 'text-red-500' :
+                              'text-yellow-500'
+                            }>
+                              Status: {submission.status}
+                            </span>
+                            <span className="text-sm">
+                              Language: {submission.language}
+                            </span>
+                          </div>
+                          <span className="text-sm text-gray-500">
+                            {new Date(submission.created_at * 1000).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="mt-2 p-2 bg-gray-100 dark:bg-gray-800 rounded">
+                          <pre className="text-sm overflow-x-auto">
+                            <code>{submission.code}</code>
+                          </pre>
+                        </div>
+                        {submission.result && (
+                          <pre className="mt-2 p-2 bg-gray-100 dark:bg-gray-800 rounded text-sm text-wrap">
+                            <div className="font-medium mb-1">Result:</div>
+                            {submission.result}
+                          </pre>
+                        )}
+
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

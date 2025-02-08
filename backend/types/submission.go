@@ -1,7 +1,7 @@
 package types
 
 type Submission struct {
-	ID          string  `json:"id" dynamodbav:"id"`
+	SubmissionID string  `json:"submission_id" dynamodbav:"submission_id"`
 	UserID      string  `json:"user_id" dynamodbav:"user_id"`
 	ProblemID   string  `json:"problem_id" dynamodbav:"problem_id"`
 	Language    string  `json:"language" dynamodbav:"language"`

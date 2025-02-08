@@ -111,7 +111,7 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	if err != nil {
 		// Update submission status
 		errOutput := stderr.String()
-		if err := db.UpdateSubmissionStatus(ctx, submission.ID, "error", &errOutput); err != nil {
+		if err := db.UpdateSubmissionStatus(ctx, submission.ProblemID, submission.ID, "error", &errOutput); err != nil {
 			return events.APIGatewayProxyResponse{
 				StatusCode: 500,
 				Body:       fmt.Sprintf(`{"error": "Failed to update submission: %v"}`, err),
@@ -130,14 +130,14 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	cleanExpected := strings.TrimSpace(problem.Output)
 
 	if cleanOutput == cleanExpected {
-		if err := db.UpdateSubmissionStatus(ctx, submission.ID, "success", &output); err != nil {
+		if err := db.UpdateSubmissionStatus(ctx, submission.ProblemID, submission.ID, "success", &output); err != nil {
 			return events.APIGatewayProxyResponse{
 				StatusCode: 500,
 				Body:       fmt.Sprintf(`{"error": "Failed to update submission: %v"}`, err),
 			}, nil
 		}
 	} else {
-		if err := db.UpdateSubmissionStatus(ctx, submission.ID, "wrong_answer", &output); err != nil {
+		if err := db.UpdateSubmissionStatus(ctx, submission.ProblemID, submission.ID, "wrong_answer", &output); err != nil {
 			return events.APIGatewayProxyResponse{
 				StatusCode: 500,
 				Body:       fmt.Sprintf(`{"error": "Failed to update submission: %v"}`, err),

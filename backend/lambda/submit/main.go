@@ -66,13 +66,15 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	}
 
 	// Create submission record
+	submissionId := uuid.New().String()
 	submission := types.Submission{
-		ID:        uuid.New().String(),
+		SubmissionID: fmt.Sprintf("SUBMISSION#%s", submissionId),
 		UserID:    githubUser.ID,
 		ProblemID: req.ProblemID,
 		Language:  req.Language,
 		Code:      req.Code,
 		Status:    "pending",
+
 		CreatedAt: time.Now().Unix(),
 		UpdatedAt: time.Now().Unix(),
 		Type:      req.Type,

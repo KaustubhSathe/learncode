@@ -38,7 +38,7 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	}
 
 	// Update status to running
-	if err := db.UpdateSubmissionStatus(ctx, submission.ID, "running", nil); err != nil {
+	if err := db.UpdateSubmissionStatus(ctx, submission.ProblemID, submission.SubmissionID, "running", nil); err != nil {
 		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
 			Body:       fmt.Sprintf(`{"error": "Failed to update status: %v"}`, err),
@@ -49,7 +49,7 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	result, err := executePython(ctx, submission.Code, submission.ProblemID)
 	if err != nil {
 		errStr := err.Error()
-		db.UpdateSubmissionStatus(ctx, submission.ID, "error", &errStr)
+		db.UpdateSubmissionStatus(ctx, submission.ProblemID, submission.SubmissionID, "error", &errStr)
 		return events.APIGatewayProxyResponse{
 			StatusCode: 200, // Still return 200 as the webhook was processed
 			Body:       fmt.Sprintf(`{"error": "%s"}`, errStr),
@@ -57,7 +57,7 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 	}
 
 	// Update status to completed
-	if err := db.UpdateSubmissionStatus(ctx, submission.ID, "completed", &result); err != nil {
+	if err := db.UpdateSubmissionStatus(ctx, submission.ProblemID, submission.SubmissionID, "completed", &result); err != nil {
 		return events.APIGatewayProxyResponse{
 			StatusCode: 500,
 			Body:       fmt.Sprintf(`{"error": "Failed to update status: %v"}`, err),

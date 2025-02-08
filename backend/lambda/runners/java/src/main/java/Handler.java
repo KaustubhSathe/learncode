@@ -51,7 +51,7 @@ public class Handler implements RequestHandler<APIGatewayProxyRequestEvent, APIG
             
             // Parse the submission
             submission = gson.fromJson(submissionJson, Submission.class);
-            context.getLogger().log("Submission details - ID: " + submission.id + 
+            context.getLogger().log("Submission details - ID: " + submission.submission_id + 
                 ", Problem ID: " + submission.problem_id + 
                 ", User ID: " + submission.user_id +
                 ", Language: " + submission.language +
@@ -59,7 +59,7 @@ public class Handler implements RequestHandler<APIGatewayProxyRequestEvent, APIG
             
             // Update submission status to running
             context.getLogger().log("Updating submission status to running");
-            updateSubmissionStatus(submission.id, "running", null, context, submission);
+            updateSubmissionStatus(submission.problem_id, submission.submission_id, "running", null, context, submission);
             
             // Execute the Java code
             context.getLogger().log("Executing Java code");
@@ -68,7 +68,7 @@ public class Handler implements RequestHandler<APIGatewayProxyRequestEvent, APIG
             
             // Update final status
             context.getLogger().log("Updating submission status to completed");
-            updateSubmissionStatus(submission.id, "completed", result, context, submission);
+            updateSubmissionStatus(submission.problem_id, submission.submission_id, "completed", result, context, submission);
             
             context.getLogger().log("Request completed successfully");
             return new APIGatewayProxyResponseEvent()
@@ -84,7 +84,7 @@ public class Handler implements RequestHandler<APIGatewayProxyRequestEvent, APIG
             try {
                 context.getLogger().log("Updating submission status to error");
                 submission.result = errorMessage;
-                updateSubmissionStatus(submission.id, "error", null, context, submission);
+                updateSubmissionStatus(submission.problem_id, submission.submission_id, "error", null, context, submission);
             } catch (Exception updateErr) {
                 context.getLogger().log("Failed to update error status: " + updateErr.getMessage());
             }
@@ -95,11 +95,12 @@ public class Handler implements RequestHandler<APIGatewayProxyRequestEvent, APIG
         }
     }
     
-    private void updateSubmissionStatus(String id, String status, String result, Context context, Submission submission) {
-        context.getLogger().log("Updating submission status - ID: " + id + ", Status: " + status);
+    private void updateSubmissionStatus(String problemId, String submissionId, String status, String result, Context context, Submission submission) {
         Map<String, AttributeValue> key = new HashMap<>();
-        key.put("id", AttributeValue.builder().s(id).build());
+        key.put("problem_id", AttributeValue.builder().s(problemId).build());
+        key.put("submission_id", AttributeValue.builder().s(submissionId).build());
         
+
         Map<String, AttributeValue> values = new HashMap<>();
         values.put(":s", AttributeValue.builder().s(status).build());
         
@@ -275,7 +276,7 @@ class RunRequest {
 }
 
 class Submission {
-    public String id;
+    public String submission_id;
     public String user_id;
     public String problem_id;
     public String language;

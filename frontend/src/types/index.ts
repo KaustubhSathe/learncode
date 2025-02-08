@@ -27,8 +27,14 @@ export interface ProblemsResponse {
 } 
 
 export interface Submission {
-  id: string
+  submission_id: string
   status: 'pending' | 'running' | 'completed' | 'error'
   result?: string
-  type: 'submit' | 'run'
+  type: 'submit' | 'run' | 'RUN' | 'SUBMIT'
+  code: string
+  language: string
+  created_at: number
+  updated_at: number
+  problem_id: string
+  user_id: string
 }

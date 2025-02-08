@@ -25,10 +25,6 @@
                     "id": "h2nj9f1eqkh5n1rsezb6w64p"
                 },
                 {
-                    "text": "Web Builder\n",
-                    "id": "hyilgkr8321xxqoio8w6v8n3"
-                },
-                {
                     "text": "Spreadsheet\n\ndsfds",
                     "id": "ex0omnu4d3q4dz1b2ujczre0"
                 }
@@ -42,6 +38,10 @@
                 {
                     "text": "## LearnCode\n\n- tests\n- ~~admin panel~~ \n- ~~run button~~\n- submit button\n- submission history",
                     "id": "yg9wuqph526g6em6lomhp1hz"
+                },
+                {
+                    "text": "Web Builder\n- login page\n- dashboard of projects\n- builder\n",
+                    "id": "hyilgkr8321xxqoio8w6v8n3"
                 }
             ],
             "id": "h4s9koycv7cfebbgm34r6pt3",
@@ -56,5 +56,5 @@
     ],
     "autosave": true,
     "saveToFile": true,
-    "timestamp": 1738911460707
+    "timestamp": 1738929825322
 }

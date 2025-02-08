@@ -54,13 +54,18 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 		TimeToLiveAttribute: jsii.String("deleted_at"),
 	})
 
-	submissionsTable := awsdynamodb.NewTable(stack, jsii.String("Submissions"), &awsdynamodb.TableProps{
+	submissionsTable := awsdynamodb.NewTable(stack, jsii.String("SubmissionsTable"), &awsdynamodb.TableProps{
 		PartitionKey: &awsdynamodb.Attribute{
-			Name: jsii.String("id"),
+			Name: jsii.String("problem_id"),
 			Type: awsdynamodb.AttributeType_STRING,
 		},
-		BillingMode: awsdynamodb.BillingMode_PAY_PER_REQUEST,
-		TableName:   jsii.String("Submissions"),
+		SortKey: &awsdynamodb.Attribute{
+			Name: jsii.String("submission_id"),
+			Type: awsdynamodb.AttributeType_STRING,
+		},
+		BillingMode:   awsdynamodb.BillingMode_PAY_PER_REQUEST,
+		TableName:     jsii.String("SubmissionsV2"),
+		RemovalPolicy: awscdk.RemovalPolicy_DESTROY,
 	})
 
 	usersTable := awsdynamodb.NewTable(stack, jsii.String("Users"), &awsdynamodb.TableProps{
@@ -491,7 +496,7 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 	})
 
 	// Get Submission Lambda
-	getSubmissionLambda := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("GetSubmissionFunction"), &awscdklambdagoalpha.GoFunctionProps{
+	getSubmissionFunction := awscdklambdagoalpha.NewGoFunction(stack, jsii.String("GetSubmissionFunction"), &awscdklambdagoalpha.GoFunctionProps{
 		Runtime: awslambda.Runtime_PROVIDED_AL2(),
 		Entry:   jsii.String("lambda/get-submission"),
 		Role:    lambdaRole,
@@ -501,23 +506,22 @@ func NewBackendStack(scope constructs.Construct, id string, props *BackendStackP
 				"GOARCH": jsii.String("amd64"),
 			},
 		},
+		Timeout: awscdk.Duration_Seconds(jsii.Number(30)),
 		Environment: &map[string]*string{
 			"SUBMISSIONS_TABLE": submissionsTable.TableName(),
 			"USERS_TABLE":       usersTable.TableName(),
 		},
 	})
 
-	submissionsTable.GrantReadData(getSubmissionLambda)
-	usersTable.GrantReadData(getSubmissionLambda)
+	submissionsTable.GrantReadData(getSubmissionFunction)
+	usersTable.GrantReadData(getSubmissionFunction)
 
 	httpApi.AddRoutes(&awscdkapigatewayv2alpha.AddRoutesOptions{
-		Path: jsii.String("/submissions/{id}"),
-		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{
-			awscdkapigatewayv2alpha.HttpMethod_GET,
-		},
+		Path:    jsii.String("/submissions"),
+		Methods: &[]awscdkapigatewayv2alpha.HttpMethod{awscdkapigatewayv2alpha.HttpMethod_GET},
 		Integration: awscdkapigatewayv2integrationsalpha.NewHttpLambdaIntegration(
 			jsii.String("GetSubmissionIntegration"),
-			getSubmissionLambda,
+			getSubmissionFunction,
 			&awscdkapigatewayv2integrationsalpha.HttpLambdaIntegrationProps{},
 		),
 	})
